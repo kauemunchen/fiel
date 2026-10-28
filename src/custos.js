@@ -25,6 +25,10 @@ export const PRECOS_PADRAO = {
   // Meta de margem líquida mínima por crédito vendido (fração: 0.75 = 75%).
   // Qualquer pacote cuja margem Pix/Cartão fique abaixo disso é marcado como "abaixo da meta" no painel.
   'margem_meta': 0.75,
+  // Piso absoluto de margem por conta: quando o custo real da IA desde a última recarga paga
+  // atinge (1 - margem_piso) × valor_pago, o consumo da conta é travado até nova compra.
+  // Default 0.50 = 50% (ninguém consome mais de metade do que pagou em custo de IA).
+  'margem_piso': 0.50,
   // Quantos tokens de IA 1 crédito compra. Lido em runtime por tokensPorCredito() em creditos/index.js.
   'tokens_por_credito': 1000,
 };

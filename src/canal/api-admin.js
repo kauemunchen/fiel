@@ -126,7 +126,20 @@ export function rotasAdmin(app) {
     res.json({ ok: true, enviados, total: donos.length });
   });
   // ---------- Custos: quanto você paga de IA + MP + VPS, e qual sua margem ----------
-  app.get('/api/admin/custos', auth, async (req, res) => { const { resumo, margemPacotes } = await import('../custos.js'); const dias = Number(req.query.dias || 30); const geral = resumo({ dias }); const admin = resumo({ contaId: req.contaId, dias }); const margens = await margemPacotes(); const matriz = await (await import('../custos.js')).matrizCustos(); res.json({ geral, admin, margens, matriz, admin_conta: db.prepare('SELECT nome_dono, plano, admin FROM contas WHERE id=?').get(req.contaId) }); });
+  app.get('/api/admin/custos', auth, async (req, res) => {
+    const { resumo, margemPacotes } = await import('../custos.js');
+    const { limiteMargem } = await import('../creditos/index.js');
+    const dias = Number(req.query.dias || 30);
+    const geral = resumo({ dias }); const admin = resumo({ contaId: req.contaId, dias });
+    const margens = await margemPacotes();
+    const matriz = await (await import('../custos.js')).matrizCustos();
+    // Contas bloqueadas pelo piso de margem (ou com consumo acima de 90% do limite — alerta amarelo)
+    const todas = db.prepare("SELECT id, nome_dono, empresa, plano, status, bloqueada_margem_em FROM contas WHERE admin=0 AND plano<>'ilimitado' AND status<>'suspensa'").all();
+    const limites = []; let bloqueadas = 0; let alerta = 0;
+    for (const c of todas) { const lm = limiteMargem(c.id); if (!lm.aplicavel) continue; if (lm.bloqueado || lm.pct_do_limite >= 90) { limites.push({ ...c, ...lm }); if (lm.bloqueado) bloqueadas++; else alerta++; } }
+    limites.sort((a, b) => (b.pct_do_limite || 0) - (a.pct_do_limite || 0));
+    res.json({ geral, admin, margens, matriz, admin_conta: db.prepare('SELECT nome_dono, plano, admin FROM contas WHERE id=?').get(req.contaId), piso: { bloqueadas, alerta, contas: limites.slice(0, 50) } });
+  });
   app.post('/api/admin/custos/resetar', auth, async (req, res) => { const { PRECOS_PADRAO, definirPreco } = await import('../custos.js'); for (const [k, v] of Object.entries(PRECOS_PADRAO)) definirPreco(k, v); logAdmin(req.contaId, 'custos.resetar'); res.json({ ok: true }); });
   app.post('/api/admin/custos/preco', auth, async (req, res) => { const { definirPreco } = await import('../custos.js'); const b = req.body || {}; if (!b.chave) return res.status(400).json({ erro: 'chave?' }); definirPreco(b.chave, b.valor); logAdmin(req.contaId, 'custos.preco', b.chave, { valor: b.valor }); res.json({ ok: true }); });
 

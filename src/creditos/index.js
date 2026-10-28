@@ -8,7 +8,9 @@ export function prepararCreditos() {
     id INTEGER PRIMARY KEY, conta_id INTEGER NOT NULL, tipo TEXT NOT NULL, quantidade REAL NOT NULL,
     motivo TEXT, modulo TEXT, ref TEXT, criado_em TEXT DEFAULT CURRENT_TIMESTAMP
   ); CREATE INDEX IF NOT EXISTS ix_creditos_conta ON creditos_mov (conta_id, criado_em)`);
-  for (const [c, def] of [['plano', "TEXT DEFAULT 'trial'"], ['status', "TEXT DEFAULT 'ativa'"], ['admin', 'INTEGER DEFAULT 0'], ['creditos_alerta', 'TEXT'], ['email', 'TEXT'], ['pesquisa_web', 'INTEGER DEFAULT 0'], ['aceite_termos_em', 'TEXT'], ['aceite_termos_versao', 'TEXT'], ['aceite_termos_ip', 'TEXT']]) { try { db.exec(`ALTER TABLE contas ADD COLUMN ${c} ${def}`); } catch {} }
+  // Coluna com o valor em BRL da recarga (preenchida só para créditos pagos; usada pelo limitador de margem)
+  try { db.exec(`ALTER TABLE creditos_mov ADD COLUMN valor_brl REAL`); } catch {}
+  for (const [c, def] of [['plano', "TEXT DEFAULT 'trial'"], ['status', "TEXT DEFAULT 'ativa'"], ['admin', 'INTEGER DEFAULT 0'], ['creditos_alerta', 'TEXT'], ['email', 'TEXT'], ['pesquisa_web', 'INTEGER DEFAULT 0'], ['aceite_termos_em', 'TEXT'], ['aceite_termos_versao', 'TEXT'], ['aceite_termos_ip', 'TEXT'], ['bloqueada_margem_em', 'TEXT']]) { try { db.exec(`ALTER TABLE contas ADD COLUMN ${c} ${def}`); } catch {} }
   // Primeira conta do banco (a do Kauê) vira admin/ilimitada se ainda não houver nenhum admin.
   if (!db.prepare('SELECT id FROM contas WHERE admin=1').get()) { const p = db.prepare('SELECT id FROM contas ORDER BY id LIMIT 1').get(); if (p) db.prepare("UPDATE contas SET admin=1, plano='ilimitado' WHERE id=?").run(p.id); }
 }
@@ -54,11 +56,44 @@ export function saldo(contaId) { return +(db.prepare('SELECT COALESCE(SUM(quanti
 /** Base para os alertas de 20%/5%: a última recarga (ou o trial). */
 export function ultimaRecarga(contaId) { return db.prepare("SELECT quantidade FROM creditos_mov WHERE conta_id=? AND quantidade>0 ORDER BY id DESC LIMIT 1").get(contaId)?.quantidade || TRIAL_CREDITOS; }
 
-export function creditar(contaId, quantidade, { tipo = 'credito', motivo = '', ref = null } = {}) {
+export function creditar(contaId, quantidade, { tipo = 'credito', motivo = '', ref = null, valor_brl = null } = {}) {
   if (!(quantidade > 0)) throw new Error('quantidade inválida');
-  db.prepare('INSERT INTO creditos_mov (conta_id, tipo, quantidade, motivo, ref) VALUES (?,?,?,?,?)').run(contaId, tipo, quantidade, motivo, ref);
-  db.prepare("UPDATE contas SET creditos_alerta=NULL, status=CASE WHEN status='bloqueada' THEN 'ativa' ELSE status END WHERE id=?").run(contaId);
+  db.prepare('INSERT INTO creditos_mov (conta_id, tipo, quantidade, motivo, ref, valor_brl) VALUES (?,?,?,?,?,?)').run(contaId, tipo, quantidade, motivo, ref, valor_brl);
+  // Toda recarga limpa alertas e destrava bloqueios anteriores (saldo zero OU margem estourada)
+  db.prepare("UPDATE contas SET creditos_alerta=NULL, bloqueada_margem_em=NULL, status=CASE WHEN status='bloqueada' THEN 'ativa' ELSE status END WHERE id=?").run(contaId);
   return saldo(contaId);
+}
+
+/** Limite de margem: se o custo real da IA desde a última recarga paga passar de
+ * (1 - margem_piso) × valor_pago, bloqueia novos consumos até nova compra.
+ * Trial e contas sem recarga paga ficam fora da regra. Não aplica a admin/ilimitada.
+ * Lido via SQL direto para não criar dependência circular com src/custos.js. */
+export function limiteMargem(contaId) {
+  try {
+    const c = contaDe(contaId); if (!c) return { aplicavel: false };
+    if (c.admin === 1 || c.plano === 'ilimitado') return { aplicavel: false };
+    const recarga = db.prepare("SELECT id, valor_brl, criado_em FROM creditos_mov WHERE conta_id=? AND quantidade>0 AND valor_brl>0 ORDER BY id DESC LIMIT 1").get(contaId);
+    if (!recarga || !(recarga.valor_brl > 0)) return { aplicavel: false };
+    const p = Object.fromEntries(db.prepare("SELECT chave, valor FROM custos_cfg").all().map(r => [r.chave, r.valor]));
+    const piso = p['margem_piso'] ?? 0.50;
+    const cambio = p['usd_brl'] || 5.6;
+    const normal = (m) => { const s = String(m||'').toLowerCase(); if (s.includes('2.5-flash')&&!s.includes('lite')) return 'gemini-2.5-flash'; if (s.includes('2.5-pro')) return 'gemini-2.5-pro'; if (s.includes('flash-lite')) return 'gemini-flash-lite'; if (s.includes('2.0-flash')) return 'gemini-2.0-flash'; if (s.includes('1.5-flash')) return 'gemini-1.5-flash'; if (s.includes('1.5-pro')) return 'gemini-1.5-pro'; return 'gemini-2.5-flash'; };
+    const u = db.prepare("SELECT modelo, SUM(tokens_in) ti, SUM(tokens_out) tout FROM uso WHERE conta_id=? AND criado_em >= ? GROUP BY modelo").all(contaId, recarga.criado_em);
+    let custoUsd = 0;
+    for (const r of u) { const k = normal(r.modelo); custoUsd += (r.ti||0)/1e6 * (p[k+'_in']||0) + (r.tout||0)/1e6 * (p[k+'_out']||0); }
+    const custoBrl = +(custoUsd * cambio).toFixed(2);
+    const limite = +(recarga.valor_brl * (1 - piso)).toFixed(2);
+    return {
+      aplicavel: true,
+      valor_pago_brl: recarga.valor_brl,
+      custo_atual_brl: custoBrl,
+      limite_brl: limite,
+      piso_pct: +(piso * 100).toFixed(0),
+      bloqueado: custoBrl >= limite,
+      pct_do_limite: limite > 0 ? +(custoBrl / limite * 100).toFixed(1) : 0,
+      margem_atual_pct: +((1 - custoBrl / recarga.valor_brl) * 100).toFixed(1),
+    };
+  } catch (e) { console.error('[limiteMargem]', e.message); return { aplicavel: false, erro: e.message }; }
 }
 /** Debita (não lança erro: cobrança nunca derruba a operação). Dispara alertas de saldo. */
 export function debitar(contaId, quantidade, { tipo = 'debito', motivo = '', modulo = null, ref = null } = {}) {
@@ -73,16 +108,25 @@ export function debitarTokens(contaId, modulo, tokens, modelo) { if (!(tokens > 
 export function cobrar(contaId, item, { modulo = null, vezes = 1, ref = null } = {}) { const t = TARIFAS[item]; if (!t) return; return debitar(contaId, t * vezes, { motivo: item.replace(/_/g, ' '), modulo, ref }); }
 export function concederTrial(contaId) { if (db.prepare("SELECT id FROM creditos_mov WHERE conta_id=? AND tipo='trial'").get(contaId)) return; creditar(contaId, TRIAL_CREDITOS, { tipo: 'trial', motivo: `Boas-vindas ao ${PRODUTO}` }); }
 
-/** Pode consumir? (admin/ilimitada sempre; senão saldo > 0 e conta ativa). Tolerância pequena para terminar a mensagem em curso. */
+/** Pode consumir? (admin/ilimitada sempre; senão saldo > 0 + conta ativa + não bateu o piso de margem). */
 export function podeUsar(contaId, { tolerancia = 0 } = {}) {
   const c = contaDe(contaId); if (!c) return false; if (c.admin === 1 || c.plano === 'ilimitado') return true;
   if (c.status === 'suspensa') return false;
-  return saldo(contaId) > -tolerancia;
+  if (!(saldo(contaId) > -tolerancia)) return false;
+  // Piso de margem: se o custo real da IA desde a última recarga passar do limite, trava e marca a conta.
+  const lm = limiteMargem(contaId);
+  if (lm.aplicavel && lm.bloqueado) {
+    try { db.prepare("UPDATE contas SET bloqueada_margem_em=COALESCE(bloqueada_margem_em, CURRENT_TIMESTAMP) WHERE id=?").run(contaId); } catch {}
+    return false;
+  }
+  return true;
 }
 export const COMANDOS_LIVRES = /^(cr[ée]ditos?|saldo|status|ajuda|web \d{6}|sim|n[ãa]o|ok|cancela|deixa|comprar|planos?)\b/i;
 export function mensagemBloqueio(contaId) {
-  const s = saldo(contaId);
-  return `🔒 Seus créditos do ${PRODUTO} acabaram (saldo ${fmt(s)}). Para continuar usando a equipe, recarregue em *Créditos* no app web${process.env.WEBAPP_URL ? ` (${process.env.WEBAPP_URL}/app)` : ''} ou mande "comprar". Agenda e publicações já programadas continuam saindo.`;
+  // Mesma leitura para o usuário em qualquer motivo de bloqueio (saldo zerado ou piso de margem interno):
+  // "seu consumo de créditos expirou" + como recarregar. O detalhe técnico de margem fica no painel admin.
+  const link = process.env.WEBAPP_URL ? ` (${process.env.WEBAPP_URL}/app)` : '';
+  return `🔒 Seu *consumo de créditos expirou*. Para continuar usando a equipe do ${PRODUTO}, faça uma nova recarga em *Créditos* no app${link} ou mande "comprar". Agenda e publicações já programadas continuam saindo.`;
 }
 export const fmt = (n) => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 

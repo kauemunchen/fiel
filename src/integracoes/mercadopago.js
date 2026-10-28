@@ -110,7 +110,7 @@ async function confirmar(idExterno, { tipoWebhook = 'payment' } = {}) {
   if (!c || c.status === 'pago') return c;
   const p = PACOTES.find(x => x.id === c.pacote_id);
   db.prepare("UPDATE cobrancas SET status='pago', pago_em=CURRENT_TIMESTAMP WHERE id=?").run(c.id);
-  creditar(c.conta_id, c.creditos, { tipo: c.tipo === 'mensal' ? 'plano' : 'compra', motivo: `${p?.nome || c.pacote_id} · R$ ${c.valor}`, ref: `mp:${pag.id}` });
+  creditar(c.conta_id, c.creditos, { tipo: c.tipo === 'mensal' ? 'plano' : 'compra', motivo: `${p?.nome || c.pacote_id} · R$ ${c.valor}`, ref: `mp:${pag.id}`, valor_brl: Number(c.valor) || null });
   if (c.tipo === 'mensal') db.prepare("UPDATE contas SET plano=? WHERE id=?").run(c.pacote_id, c.conta_id);
   else if (db.prepare('SELECT plano FROM contas WHERE id=?').get(c.conta_id)?.plano === 'trial') db.prepare("UPDATE contas SET plano='prepago' WHERE id=?").run(c.conta_id);
   avisar(c.conta_id, `✅ Pagamento confirmado: ${p?.nome || c.pacote_id}. +${Number(c.creditos).toLocaleString('pt-BR')} créditos no ${PRODUTO}. Obrigado!`);
