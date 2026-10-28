@@ -18,7 +18,14 @@ export const PRODUTO = 'Fiel';
 export const SUPORTE_TELEFONE = '(47) 93388-3929';
 export const SUPORTE_EMAIL = 'ola@usefiel.com';
 export const TRIAL_CREDITOS = Number(process.env.TRIAL_CREDITOS || 250);
-export const TOKENS_POR_CREDITO = 1000;
+export const TOKENS_POR_CREDITO = 1000; // default/fallback; use tokensPorCredito() para o valor vigente (editável no painel admin → Custos & margem)
+export function tokensPorCredito() {
+  try {
+    const r = db.prepare("SELECT valor FROM custos_cfg WHERE chave='tokens_por_credito'").get();
+    const v = r?.valor ? Math.max(1, Math.floor(r.valor)) : 0;
+    return v || TOKENS_POR_CREDITO;
+  } catch { return TOKENS_POR_CREDITO; }
+}
 /** Tarifas fixas (em créditos) para o que não é medido em tokens. */
 export const TARIFAS = {
   render_imagem: 1,      // arte estática / marca d'água composta
@@ -62,7 +69,7 @@ export function debitar(contaId, quantidade, { tipo = 'debito', motivo = '', mod
     const s = saldo(contaId); verificarAlertas(contaId, s); return s;
   } catch (e) { console.error('[creditos] debitar', e.message); return null; }
 }
-export function debitarTokens(contaId, modulo, tokens, modelo) { if (!(tokens > 0)) return; return debitar(contaId, tokens / TOKENS_POR_CREDITO, { motivo: `IA ${modelo || ''}`.trim(), modulo, ref: `tokens:${tokens}` }); }
+export function debitarTokens(contaId, modulo, tokens, modelo) { if (!(tokens > 0)) return; return debitar(contaId, tokens / tokensPorCredito(), { motivo: `IA ${modelo || ''}`.trim(), modulo, ref: `tokens:${tokens}` }); }
 export function cobrar(contaId, item, { modulo = null, vezes = 1, ref = null } = {}) { const t = TARIFAS[item]; if (!t) return; return debitar(contaId, t * vezes, { motivo: item.replace(/_/g, ' '), modulo, ref }); }
 export function concederTrial(contaId) { if (db.prepare("SELECT id FROM creditos_mov WHERE conta_id=? AND tipo='trial'").get(contaId)) return; creditar(contaId, TRIAL_CREDITOS, { tipo: 'trial', motivo: `Boas-vindas ao ${PRODUTO}` }); }
 
@@ -103,13 +110,13 @@ export function resumo(contaId) {
   const gasto30 = porDia.reduce((a, b) => a + b.gasto, 0);
   const mediaDia = porDia.length ? gasto30 / Math.max(porDia.length, 1) : 0;
   const historico = db.prepare('SELECT id, tipo, quantidade, motivo, modulo, ref, criado_em FROM creditos_mov WHERE conta_id=? ORDER BY id DESC LIMIT 60').all(contaId);
-  return { produto: PRODUTO, saldo: s, ilimitada: ilim, plano: c?.plano, status: c?.status, base: ultimaRecarga(contaId), gasto_30d: +gasto30.toFixed(1), media_dia: +mediaDia.toFixed(2), dias_restantes: ilim ? null : mediaDia > 0 ? Math.floor(Math.max(s, 0) / mediaDia) : null, por_dia: porDia, por_modulo: porModulo, por_tipo: porTipo, historico, tarifas: TARIFAS, tokens_por_credito: TOKENS_POR_CREDITO, pacotes: PACOTES, trial: TRIAL_CREDITOS };
+  return { produto: PRODUTO, saldo: s, ilimitada: ilim, plano: c?.plano, status: c?.status, base: ultimaRecarga(contaId), gasto_30d: +gasto30.toFixed(1), media_dia: +mediaDia.toFixed(2), dias_restantes: ilim ? null : mediaDia > 0 ? Math.floor(Math.max(s, 0) / mediaDia) : null, por_dia: porDia, por_modulo: porModulo, por_tipo: porTipo, historico, tarifas: TARIFAS, tokens_por_credito: tokensPorCredito(), pacotes: PACOTES, trial: TRIAL_CREDITOS };
 }
 export function textoResumo(contaId) {
   const r = resumo(contaId);
   if (r.ilimitada) return `💳 *${PRODUTO} · Créditos*\nSua conta é ilimitada (admin). Consumo nos últimos 30 dias: ${fmt(r.gasto_30d)} créditos.`;
   const linhas = [`💳 *${PRODUTO} · Créditos*`, `Saldo: *${fmt(r.saldo)}* créditos${r.plano && r.plano !== 'trial' ? ` · plano ${r.plano}` : r.plano === 'trial' ? ' · período de teste' : ''}`, `Últimos 30 dias: ${fmt(r.gasto_30d)} gastos (média ${fmt(r.media_dia)}/dia${r.dias_restantes != null ? `, dá para ~${r.dias_restantes} dias` : ''})`];
   if (r.por_modulo.length) linhas.push('Por assessor: ' + r.por_modulo.map(m => `${m.modulo} ${fmt(m.gasto)}`).join(' · '));
-  linhas.push(`1 crédito = ${TOKENS_POR_CREDITO} tokens de IA; story/arte 1, carrossel 3, vídeo 5, imagem IA 4.`, 'Para recarregar: "comprar" ou a tela Créditos no app.');
+  linhas.push(`1 crédito = ${tokensPorCredito()} tokens de IA; story/arte 1, carrossel 3, vídeo 5, imagem IA 4.`, 'Para recarregar: "comprar" ou a tela Créditos no app.');
   return linhas.join('\n');
 }

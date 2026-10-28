@@ -18,16 +18,34 @@ export const PRECOS_PADRAO = {
   'mp_pix_pct': 0.0099, 'mp_pix_fixo': 0,
   'mp_cartao_pct': 0.0499, 'mp_cartao_fixo': 0.40,  // crédito liberação imediata; parcelado 4,98%+0,40 à vista
   'mp_boleto_pct': 0.019, 'mp_boleto_fixo': 3.49,
-  // Custo fixo mensal (R$) — VPS Hostinger KVM 2 ~R$ 50 + domínio prorrateado + backups
-  'infra_mensal_brl': 60,
+  // Custo fixo mensal (R$) — VPS Hostinger + domínio prorrateado + backups + ferramentas externas pagas
+  'infra_mensal_brl': 220,
   // Câmbio USD → BRL de referência (base para converter o custo de IA)
-  'usd_brl': 5.5,
+  'usd_brl': 5.60,
+  // Meta de margem líquida mínima por crédito vendido (fração: 0.75 = 75%).
+  // Qualquer pacote cuja margem Pix/Cartão fique abaixo disso é marcado como "abaixo da meta" no painel.
+  'margem_meta': 0.75,
+  // Quantos tokens de IA 1 crédito compra. Lido em runtime por tokensPorCredito() em creditos/index.js.
+  'tokens_por_credito': 1000,
+};
+
+/** Valores que já existiram como default e que podem ser atualizados automaticamente
+ * para o novo default se o admin nunca os tiver editado manualmente. */
+const DEFAULTS_ANTIGOS = {
+  'infra_mensal_brl': [60],
+  'usd_brl': [5.5, 5.50],
 };
 
 export function prepararCustos() {
   db.exec(`CREATE TABLE IF NOT EXISTS custos_cfg (chave TEXT PRIMARY KEY, valor REAL)`);
   const ins = db.prepare('INSERT OR IGNORE INTO custos_cfg (chave, valor) VALUES (?,?)');
   for (const [k, v] of Object.entries(PRECOS_PADRAO)) ins.run(k, v);
+  // One-shot: se o valor em banco ainda for um default anterior, atualiza para o novo default.
+  const upd = db.prepare('UPDATE custos_cfg SET valor=? WHERE chave=? AND valor IN (' + Array(10).fill('?').slice(0, 1).map(() => '?').join(',') + ')');
+  for (const [k, antigos] of Object.entries(DEFAULTS_ANTIGOS)) {
+    const atual = db.prepare('SELECT valor FROM custos_cfg WHERE chave=?').get(k)?.valor;
+    if (atual != null && antigos.includes(atual)) db.prepare('UPDATE custos_cfg SET valor=? WHERE chave=?').run(PRECOS_PADRAO[k], k);
+  }
 }
 
 export function precos() { prepararCustos(); const rows = db.prepare('SELECT chave, valor FROM custos_cfg').all(); return Object.fromEntries(rows.map(r => [r.chave, r.valor])); }
@@ -77,26 +95,70 @@ export function resumo({ contaId = null, dias = 30 } = {}) {
 /** Matriz pacote × modelo: para cada pacote, qual seria o custo e margem se o cliente usasse só aquele modelo. */
 export async function matrizCustos() {
   const p = precos(); const cambio = p['usd_brl'] || 5.5;
-  const { PACOTES, TOKENS_POR_CREDITO } = await import('./creditos/index.js');
+  const { PACOTES, tokensPorCredito } = await import('./creditos/index.js');
+  const TPC = tokensPorCredito();
   const MODELOS = [['Gemini 2.5 Pro','gemini-2.5-pro'],['Gemini 2.5 Flash','gemini-2.5-flash'],['Gemini 2.5 Flash-Lite','gemini-flash-lite'],['Gemini 2.0 Flash','gemini-2.0-flash'],['Gemini 2.0 Flash-Lite','gemini-2.0-flash-lite'],['Gemini 1.5 Flash','gemini-1.5-flash'],['Gemini 1.5 Pro','gemini-1.5-pro']];
-  const custo1k = (k) => (TOKENS_POR_CREDITO * 0.7 * (p[k+'_in']||0) + TOKENS_POR_CREDITO * 0.3 * (p[k+'_out']||0)) / 1e6 * cambio;
+  const custo1k = (k) => (TPC * 0.7 * (p[k+'_in']||0) + TPC * 0.3 * (p[k+'_out']||0)) / 1e6 * cambio;
   const modelos = MODELOS.map(([nome, chave]) => ({ nome, chave, r_por_1k: +custo1k(chave).toFixed(5) }));
   const matriz = PACOTES.map(pac => ({ pacote: pac.nome, tipo: pac.tipo, preco: pac.preco, creditos: pac.creditos, por_modelo: MODELOS.map(([nome, chave]) => { const custo = custo1k(chave) * pac.creditos; const taxa = pac.preco * (p['mp_pix_pct']||0) + (p['mp_pix_fixo']||0); const lucro = pac.preco - custo - taxa; return { modelo: nome, custo_ia: +custo.toFixed(2), lucro: +lucro.toFixed(2), margem_pct: pac.preco > 0 ? +(lucro / pac.preco * 100).toFixed(1) : 0 }; }) }));
   return { modelos, matriz };
 }
 
-/** Margem bruta estimada por pacote (preço vigente × créditos × custo médio por crédito × taxa MP). */
+/** Margem bruta estimada por pacote (preço vigente × créditos × custo médio por crédito × taxa MP).
+ * Como o preço dos pacotes é fixo, calcula também "tokens_credito_max": quantos tokens
+ * um crédito pode consumir para o pacote fechar com a meta (p['margem_meta']) de margem líquida.
+ * O menor valor entre todos os pacotes vira a tarifa recomendada (TOKENS_POR_CREDITO sugerido). */
 export async function margemPacotes() {
-  const p = precos(); const cambio = p['usd_brl'] || 5.5;
-  const { PACOTES, TOKENS_POR_CREDITO } = await import('./creditos/index.js' /* resolved relative to this file */);
-  // Custo médio por crédito: 1000 tokens no Gemini 2.5 Flash, mix 70% in + 30% out
-  const custoIAperCred = ((TOKENS_POR_CREDITO * 0.7) * p['gemini-2.5-flash_in'] + (TOKENS_POR_CREDITO * 0.3) * p['gemini-2.5-flash_out']) / 1e6 * cambio;
-  return PACOTES.map(pac => {
+  const p = precos(); const cambio = p['usd_brl'] || 5.5; const metaFrac = p['margem_meta'] ?? 0.75;
+  const { PACOTES, tokensPorCredito } = await import('./creditos/index.js' /* resolved relative to this file */);
+  const TPC = tokensPorCredito();
+  // Custo por token (BRL) no Gemini 2.5 Flash, mix 70% in + 30% out
+  const custoPorTokenBRL = (0.7 * p['gemini-2.5-flash_in'] + 0.3 * p['gemini-2.5-flash_out']) / 1e6 * cambio;
+  const custoIAperCred = TPC * custoPorTokenBRL;
+  // Tokens-por-crédito que cada pacote comporta mantendo a meta pela forma Pix / Cartão
+  const tokensMax = (pac, pct, fixo) => {
+    // margem_desejada_BRL = metaFrac * preco. custo_IA_total_máx = preco*(1-pct-metaFrac) - fixo
+    const custoIAmax = pac.preco * (1 - (pct || 0) - metaFrac) - (fixo || 0);
+    if (custoIAmax <= 0 || pac.creditos <= 0) return 0;
+    return Math.floor(custoIAmax / pac.creditos / custoPorTokenBRL);
+  };
+  const linhas = PACOTES.map(pac => {
     const custoIAtotal = pac.creditos * custoIAperCred;
     const taxaPix = pac.preco * p['mp_pix_pct'] + p['mp_pix_fixo'];
     const taxaCartao = pac.preco * p['mp_cartao_pct'] + p['mp_cartao_fixo'];
     const lucroPix = pac.preco - custoIAtotal - taxaPix;
     const lucroCartao = pac.preco - custoIAtotal - taxaCartao;
-    return { ...pac, custo_credito: +custoIAperCred.toFixed(4), custo_ia: +custoIAtotal.toFixed(2), taxa_pix: +taxaPix.toFixed(2), taxa_cartao: +taxaCartao.toFixed(2), lucro_pix: +lucroPix.toFixed(2), lucro_cartao: +lucroCartao.toFixed(2), margem_pix_pct: +(lucroPix / pac.preco * 100).toFixed(1), margem_cartao_pct: +(lucroCartao / pac.preco * 100).toFixed(1) };
+    const margemPixPct = lucroPix / pac.preco; const margemCartaoPct = lucroCartao / pac.preco;
+    const tokensMaxPix = tokensMax(pac, p['mp_pix_pct'], p['mp_pix_fixo']);
+    const tokensMaxCartao = tokensMax(pac, p['mp_cartao_pct'], p['mp_cartao_fixo']);
+    return {
+      ...pac,
+      custo_credito: +custoIAperCred.toFixed(4),
+      custo_ia: +custoIAtotal.toFixed(2),
+      taxa_pix: +taxaPix.toFixed(2),
+      taxa_cartao: +taxaCartao.toFixed(2),
+      lucro_pix: +lucroPix.toFixed(2),
+      lucro_cartao: +lucroCartao.toFixed(2),
+      margem_pix_pct: +(margemPixPct * 100).toFixed(1),
+      margem_cartao_pct: +(margemCartaoPct * 100).toFixed(1),
+      tokens_credito_max_pix: tokensMaxPix,
+      tokens_credito_max_cartao: tokensMaxCartao,
+      abaixo_meta_pix: margemPixPct < metaFrac,
+      abaixo_meta_cartao: margemCartaoPct < metaFrac,
+      meta_pct: +(metaFrac * 100).toFixed(0),
+    };
   });
+  // Tarifa recomendada: o pior caso (menor tokens/crédito) entre todos os pacotes, considerando cartão (mais caro).
+  const limites = linhas.map(l => Math.min(l.tokens_credito_max_pix || Infinity, l.tokens_credito_max_cartao || Infinity)).filter(v => v > 0 && v !== Infinity);
+  const tokensRecomendados = limites.length ? Math.min(...limites) : TOKENS_POR_CREDITO;
+  // Aplica em todas as linhas também o "tokens recomendado por pacote" (pior do próprio pacote)
+  for (const l of linhas) l.tokens_credito_recomendado = Math.min(l.tokens_credito_max_pix || Infinity, l.tokens_credito_max_cartao || Infinity);
+  return {
+    linhas,
+    tokens_por_credito_atual: TPC,
+    tokens_por_credito_recomendado: tokensRecomendados,
+    tokens_por_credito_ajuste_pct: TPC > 0 ? +((tokensRecomendados - TPC) / TPC * 100).toFixed(1) : 0,
+    meta_pct: +(metaFrac * 100).toFixed(0),
+    custo_por_token_brl: +custoPorTokenBRL.toFixed(8),
+  };
 }
