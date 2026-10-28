@@ -36,7 +36,7 @@ services:
       - ./data/uploads:/app/data/uploads
     labels:
       - traefik.enable=true
-      - traefik.http.routers.assessor.rule=Host(`assessor.kauemunchen.com.br`)
+      - traefik.http.routers.assessor.rule=Host(`usefiel.com`) || Host(`assessor.kauemunchen.com.br`)
       - traefik.http.routers.assessor.entrypoints=websecure
       - traefik.http.routers.assessor.tls.certresolver=letsencrypt
       - traefik.http.services.assessor.loadbalancer.server.url=http://127.0.0.1:3010
