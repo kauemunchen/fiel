@@ -58,9 +58,9 @@ body{font-family:var(--f-body);background:var(--papel);color:var(--tinta);font-s
 #lateral .marca{color:var(--tinta)}
 #lateral .marca .logo-img{filter:drop-shadow(0 1px 0 rgba(255,255,255,.3))}
 @media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]) .marca .logo-img{content:url("/app/logo-km-branco.png")}
+  :root:not([data-theme="light"]) .marca .logo-img{content:url("/app/logo-fiel-branco.png")}
 }
-:root[data-theme="dark"] .marca .logo-img{content:url("/app/logo-km-branco.png")}
+:root[data-theme="dark"] .marca .logo-img{content:url("/app/logo-fiel-branco.png")}
 
 /* ============ BOTÕES ============ */
 .btn{display:inline-block;padding:11px 20px;border-radius:999px;text-decoration:none;font-weight:600;border:0;cursor:pointer;font-family:var(--f-body);font-size:13.5px;transition:transform .1s}
