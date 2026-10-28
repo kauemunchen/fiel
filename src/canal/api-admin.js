@@ -138,8 +138,16 @@ export function rotasAdmin(app) {
     const limites = []; let bloqueadas = 0; let alerta = 0;
     for (const c of todas) { const lm = limiteMargem(c.id); if (!lm.aplicavel) continue; if (lm.bloqueado || lm.pct_do_limite >= 90) { limites.push({ ...c, ...lm }); if (lm.bloqueado) bloqueadas++; else alerta++; } }
     limites.sort((a, b) => (b.pct_do_limite || 0) - (a.pct_do_limite || 0));
-    res.json({ geral, admin, margens, matriz, admin_conta: db.prepare('SELECT nome_dono, plano, admin FROM contas WHERE id=?').get(req.contaId), piso: { bloqueadas, alerta, contas: limites.slice(0, 50) } });
+    const fixos = (await import('../custos.js')).listarCustosFixos();
+    res.json({ geral, admin, margens, matriz, fixos, admin_conta: db.prepare('SELECT nome_dono, plano, admin FROM contas WHERE id=?').get(req.contaId), piso: { bloqueadas, alerta, contas: limites.slice(0, 50) } });
   });
+  // Custos fixos mensais detalhados
+  app.get('/api/admin/custos-fixos', auth, async (req, res) => res.json((await import('../custos.js')).listarCustosFixos()));
+  app.post('/api/admin/custos-fixos', auth, async (req, res) => {
+    try { const { salvarCustoFixo, listarCustosFixos } = await import('../custos.js'); const id = salvarCustoFixo(req.body || {}); logAdmin(req.contaId, 'custo_fixo.salvar', String(id), req.body); res.json({ ok: true, id, ...listarCustosFixos() }); }
+    catch (e) { res.status(400).json({ erro: e.message }); }
+  });
+  app.delete('/api/admin/custos-fixos/:id', auth, async (req, res) => { const { removerCustoFixo, listarCustosFixos } = await import('../custos.js'); removerCustoFixo(Number(req.params.id)); logAdmin(req.contaId, 'custo_fixo.remover', req.params.id); res.json({ ok: true, ...listarCustosFixos() }); });
   app.post('/api/admin/custos/resetar', auth, async (req, res) => { const { PRECOS_PADRAO, definirPreco } = await import('../custos.js'); for (const [k, v] of Object.entries(PRECOS_PADRAO)) definirPreco(k, v); logAdmin(req.contaId, 'custos.resetar'); res.json({ ok: true }); });
   app.post('/api/admin/custos/preco', auth, async (req, res) => { const { definirPreco } = await import('../custos.js'); const b = req.body || {}; if (!b.chave) return res.status(400).json({ erro: 'chave?' }); definirPreco(b.chave, b.valor); logAdmin(req.contaId, 'custos.preco', b.chave, { valor: b.valor }); res.json({ ok: true }); });
 

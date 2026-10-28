@@ -52,7 +52,33 @@ export function prepararCustos() {
   }
 }
 
-export function precos() { prepararCustos(); const rows = db.prepare('SELECT chave, valor FROM custos_cfg').all(); return Object.fromEntries(rows.map(r => [r.chave, r.valor])); }
+// ---------- Custos fixos mensais detalhados (VPS, domínio, ferramentas...) ----------
+// Quando existir ao menos um item ativo, a soma deles substitui infra_mensal_brl em todos os cálculos.
+export function prepararCustosFixos() {
+  prepararCustos();
+  db.exec(`CREATE TABLE IF NOT EXISTS custos_fixos (id INTEGER PRIMARY KEY, nome TEXT NOT NULL, valor_brl REAL NOT NULL DEFAULT 0, categoria TEXT, obs TEXT, ativo INTEGER DEFAULT 1, ordem INTEGER DEFAULT 0, atualizado_em TEXT DEFAULT CURRENT_TIMESTAMP)`);
+  if (!db.prepare('SELECT id FROM custos_fixos LIMIT 1').get()) {
+    const atual = db.prepare("SELECT valor FROM custos_cfg WHERE chave='infra_mensal_brl'").get()?.valor ?? PRECOS_PADRAO.infra_mensal_brl;
+    const ins = db.prepare('INSERT INTO custos_fixos (nome, valor_brl, categoria, ordem) VALUES (?,?,?,?)');
+    [['Servidor VPS (Hostinger)', 0, 'infra'], ['Domínios (usefiel.com / .app)', 0, 'infra'], ['E-mail / Google Workspace', 0, 'ferramenta'], ['Cloudinary (mídia)', 0, 'ferramenta'], ['Backup', 0, 'infra'], ['Não detalhado (ajuste e zere)', atual, 'outros']]
+      .forEach(([n, v, c], i) => ins.run(n, v, c, i));
+  }
+}
+export function listarCustosFixos() { prepararCustosFixos(); const itens = db.prepare('SELECT * FROM custos_fixos ORDER BY ordem, id').all(); const total = +itens.filter(i => i.ativo).reduce((s, i) => s + (Number(i.valor_brl) || 0), 0).toFixed(2); return { itens, total }; }
+export function salvarCustoFixo({ id, nome, valor_brl, categoria, obs, ativo }) {
+  prepararCustosFixos(); const n = String(nome || '').trim().slice(0, 80); const v = Math.max(0, Number(valor_brl) || 0); const a = ativo === false || ativo === 0 ? 0 : 1;
+  if (!n) throw new Error('nome obrigatório');
+  if (id) { db.prepare('UPDATE custos_fixos SET nome=?, valor_brl=?, categoria=?, obs=?, ativo=?, atualizado_em=CURRENT_TIMESTAMP WHERE id=?').run(n, v, categoria || null, obs || null, a, id); return Number(id); }
+  const ordem = (db.prepare('SELECT MAX(ordem) m FROM custos_fixos').get()?.m ?? -1) + 1;
+  return Number(db.prepare('INSERT INTO custos_fixos (nome, valor_brl, categoria, obs, ativo, ordem) VALUES (?,?,?,?,?,?)').run(n, v, categoria || null, obs || null, a, ordem).lastInsertRowid);
+}
+export function removerCustoFixo(id) { prepararCustosFixos(); db.prepare('DELETE FROM custos_fixos WHERE id=?').run(id); }
+
+export function precos() {
+  prepararCustos(); const rows = db.prepare('SELECT chave, valor FROM custos_cfg').all(); const p = Object.fromEntries(rows.map(r => [r.chave, r.valor]));
+  try { const { itens, total } = listarCustosFixos(); if (itens.some(i => i.ativo)) p['infra_mensal_brl'] = total; } catch {}
+  return p;
+}
 export function definirPreco(chave, valor) { prepararCustos(); db.prepare('INSERT INTO custos_cfg (chave, valor) VALUES (?,?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor').run(chave, Number(valor)); }
 
 /** Casa o nome do modelo à chave de preço mais próxima (ex.: 'gemini-2.5-flash-002' → 'gemini-2.5-flash'). */
