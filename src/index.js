@@ -31,17 +31,19 @@ app.get('/api/publico/solucionados-hoje', (_, res) => {
   res.json({ hoje: _cont.hoje, semana: _cont.semana, total: _cont.total, data: new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10) });
 });
 // App web (estático) em /app
-app.use('/app', express.static(path.resolve('src/painel'), { index: 'index.html', extensions: ['html'] }));
-app.get(['/admin', '/admin/'], (_, res) => res.sendFile(path.resolve('src/painel/admin/index.html')));
-app.use('/admin', express.static(path.resolve('src/painel/admin'), { index: false, redirect: false }));
+// HTML/JS/CSS sempre revalidam (ETag): depois de cada deploy o navegador pega a versão nova sem precisar limpar cache.
+const semCache = (res, p) => { if (/\.(html|js|css|webmanifest)$/i.test(p)) res.setHeader('Cache-Control', 'no-cache'); };
+app.use('/app', express.static(path.resolve('src/painel'), { index: 'index.html', extensions: ['html'], setHeaders: semCache }));
+app.get(['/admin', '/admin/'], (_, res) => res.set('Cache-Control', 'no-cache').sendFile(path.resolve('src/painel/admin/index.html')));
+app.use('/admin', express.static(path.resolve('src/painel/admin'), { index: false, redirect: false, setHeaders: semCache }));
 // Manual público — sem auth, serve pra quem acabou de criar conta e precisa do passo-a-passo
-app.get(['/ajuda', '/ajuda/'], (_, res) => res.sendFile(path.resolve('src/painel/ajuda/index.html')));
-app.use('/ajuda', express.static(path.resolve('src/painel/ajuda'), { index: false, redirect: false }));
+app.get(['/ajuda', '/ajuda/'], (_, res) => res.set('Cache-Control', 'no-cache').sendFile(path.resolve('src/painel/ajuda/index.html')));
+app.use('/ajuda', express.static(path.resolve('src/painel/ajuda'), { index: false, redirect: false, setHeaders: semCache }));
 // Jurídico: Termos de Uso e Política de Privacidade — públicos, pré e pós cadastro
-app.get(['/termos', '/termos/'], (_, res) => res.sendFile(path.resolve('src/painel/termos/index.html')));
-app.use('/termos', express.static(path.resolve('src/painel/termos'), { index: false, redirect: false }));
-app.get(['/privacidade', '/privacidade/'], (_, res) => res.sendFile(path.resolve('src/painel/privacidade/index.html')));
-app.use('/privacidade', express.static(path.resolve('src/painel/privacidade'), { index: false, redirect: false }));
+app.get(['/termos', '/termos/'], (_, res) => res.set('Cache-Control', 'no-cache').sendFile(path.resolve('src/painel/termos/index.html')));
+app.use('/termos', express.static(path.resolve('src/painel/termos'), { index: false, redirect: false, setHeaders: semCache }));
+app.get(['/privacidade', '/privacidade/'], (_, res) => res.set('Cache-Control', 'no-cache').sendFile(path.resolve('src/painel/privacidade/index.html')));
+app.use('/privacidade', express.static(path.resolve('src/painel/privacidade'), { index: false, redirect: false, setHeaders: semCache }));
 app.get('/', (_, res) => res.redirect('/app'));
 
 const canal = criarCanal(process.env.CANAL || 'telegram', app, servidor);
