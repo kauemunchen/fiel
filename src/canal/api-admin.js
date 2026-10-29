@@ -43,7 +43,8 @@ export function rotasAdmin(app) {
   });
 
   // Lista completa de contas
-  app.get('/api/admin/contas', auth, (req, res) => {
+  app.get('/api/admin/contas', auth, async (req, res) => {
+    let custos = {}; try { custos = (await import('../custos.js')).custoIAPorConta(); } catch (e) { console.error('[admin] custoIAPorConta', e.message); }
     const q = String(req.query.q || '').toLowerCase(); const filtro = req.query.filtro || '';
     let sql = `SELECT c.id, c.nome_dono, c.empresa, c.plano, c.status, c.admin, c.pesquisa_web, c.email, c.cpf_cnpj, c.criado_em,
       (SELECT COALESCE(SUM(quantidade),0) FROM creditos_mov WHERE conta_id=c.id) saldo,
@@ -57,6 +58,7 @@ export function rotasAdmin(app) {
     sql += ' ORDER BY c.id DESC LIMIT 500';
     let rows = db.prepare(sql).all(...args);
     if (q) rows = rows.filter(c => `${c.nome_dono} ${c.empresa} ${c.email} ${c.cpf_cnpj}`.toLowerCase().includes(q));
+    for (const r of rows) { const k = custos[r.id] || {}; r.custo_ia_brl = k.total_brl || 0; r.custo_ia_30d_brl = k.d30_brl || 0; r.custo_gemini_brl = k.ia_brl || 0; r.custo_fal_brl = k.fal_brl || 0; r.tokens_total = k.tokens || 0; r.imagens_fal = k.imagens || 0; }
     res.json(rows);
   });
 

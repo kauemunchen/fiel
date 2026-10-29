@@ -52,6 +52,44 @@ export function prepararCustos() {
   }
 }
 
+// ---------- Uso extra com custo fora dos tokens (ex.: imagem fal.ai) — registrado para TODAS as contas, inclusive admin ----------
+export function prepararUsoExtra() {
+  db.exec(`CREATE TABLE IF NOT EXISTS uso_extra (id INTEGER PRIMARY KEY, conta_id INTEGER, tipo TEXT, qtd REAL DEFAULT 1, modulo TEXT, criado_em TEXT DEFAULT CURRENT_TIMESTAMP); CREATE INDEX IF NOT EXISTS ix_uso_extra_conta ON uso_extra (conta_id, criado_em)`);
+  prepararCustos();
+  // Marca a partir de quando uso_extra existe; antes disso, imagens fal vêm do ledger de créditos (só contas pagantes).
+  db.prepare("INSERT OR IGNORE INTO custos_cfg (chave, valor) VALUES ('uso_extra_desde', ?)").run(Date.now());
+}
+export function registrarUsoExtra(contaId, tipo, { qtd = 1, modulo = null } = {}) {
+  try { prepararUsoExtra(); db.prepare('INSERT INTO uso_extra (conta_id, tipo, qtd, modulo) VALUES (?,?,?,?)').run(contaId || 0, tipo, qtd, modulo); } catch (e) { console.error('[uso_extra]', e.message); }
+}
+
+/** Custo real de IA (BRL) por conta, de todo o histórico e dos últimos 30 dias — Gemini (tokens) + imagens fal.ai. */
+export function custoIAPorConta() {
+  prepararUsoExtra();
+  const p = precos(); const cambio = p['usd_brl'] || 5.6; const falUsd = p['fal_imagem_usd'] || 0;
+  const out = {};
+  const add = (id, k, brl, recente) => { const o = out[id] ||= { total_brl: 0, ia_brl: 0, fal_brl: 0, d30_brl: 0, tokens: 0, imagens: 0 }; o[k] += brl; o.total_brl += brl; if (recente) o.d30_brl += recente; };
+  const tok = db.prepare(`SELECT conta_id, modelo, SUM(tokens_in) ti, SUM(tokens_out) tout,
+      SUM(CASE WHEN criado_em >= datetime('now','-30 days') THEN tokens_in ELSE 0 END) ti30,
+      SUM(CASE WHEN criado_em >= datetime('now','-30 days') THEN tokens_out ELSE 0 END) tout30
+    FROM uso GROUP BY conta_id, modelo`).all();
+  for (const r of tok) {
+    const m = normalizaModelo(r.modelo); const pin = p[m + '_in'] || 0, pout = p[m + '_out'] || 0;
+    const brl = ((r.ti || 0) * pin + (r.tout || 0) * pout) / 1e6 * cambio;
+    const brl30 = ((r.ti30 || 0) * pin + (r.tout30 || 0) * pout) / 1e6 * cambio;
+    add(r.conta_id, 'ia_brl', brl, brl30); out[r.conta_id].tokens += (r.ti || 0) + (r.tout || 0);
+  }
+  const desde = new Date(Number(p['uso_extra_desde']) || Date.now()).toISOString().replace('T', ' ').slice(0, 19);
+  const fal = db.prepare(`SELECT conta_id, SUM(n) n, SUM(n30) n30 FROM (
+      SELECT conta_id, SUM(qtd) n, SUM(CASE WHEN criado_em >= datetime('now','-30 days') THEN qtd ELSE 0 END) n30 FROM uso_extra WHERE tipo='fal_imagem' GROUP BY conta_id
+      UNION ALL
+      SELECT conta_id, COUNT(*) n, SUM(CASE WHEN criado_em >= datetime('now','-30 days') THEN 1 ELSE 0 END) n30 FROM creditos_mov WHERE motivo='fal imagem' AND criado_em < ? GROUP BY conta_id
+    ) GROUP BY conta_id`).all(desde);
+  for (const r of fal) { add(r.conta_id, 'fal_brl', (r.n || 0) * falUsd * cambio, (r.n30 || 0) * falUsd * cambio); out[r.conta_id].imagens += r.n || 0; }
+  for (const o of Object.values(out)) for (const k of ['total_brl', 'ia_brl', 'fal_brl', 'd30_brl']) o[k] = +o[k].toFixed(2);
+  return out;
+}
+
 // ---------- Custos fixos mensais detalhados (VPS, domínio, ferramentas...) ----------
 // Quando existir ao menos um item ativo, a soma deles substitui infra_mensal_brl em todos os cálculos.
 export function prepararCustosFixos() {

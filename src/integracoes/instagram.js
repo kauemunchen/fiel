@@ -49,7 +49,7 @@ export async function metricas({ igUserId, token, desde }) {
 
 const TAMANHOS = { '1:1': 'square_hd', '3:4': 'portrait_4_3', '9:16': 'portrait_16_9', '16:9': 'landscape_16_9', '4:3': 'landscape_4_3', '4:5': 'portrait_4_3' };
 export async function gerarImagemFal(prompt, ratio = '3:4', modelo = 'fal-ai/flux/schnell') {
-  try { const { contextoUso } = await import('./gemini.js'); const { cobrar } = await import('../creditos/index.js'); cobrar(contextoUso.contaId, 'fal_imagem', { modulo: 'social' }); } catch {}
+  try { const { contextoUso } = await import('./gemini.js'); const { cobrar } = await import('../creditos/index.js'); cobrar(contextoUso.contaId, 'fal_imagem', { modulo: 'social' }); (await import('../custos.js')).registrarUsoExtra(contextoUso.contaId, 'fal_imagem', { modulo: 'social' }); } catch {}
   const h = { 'Content-Type': 'application/json', Authorization: `Key ${process.env.FAL_API_KEY}` };
   let r = await fetch(`https://queue.fal.run/${modelo}`, { method: 'POST', headers: h, body: JSON.stringify({ prompt, image_size: TAMANHOS[ratio] || 'portrait_4_3', num_images: 1, enable_safety_checker: true, output_format: 'jpeg' }) }).then(r => r.json());
   if (r.images) return r.images[0].url;
