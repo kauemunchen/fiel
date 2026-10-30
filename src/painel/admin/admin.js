@@ -235,3 +235,83 @@ telas.custos = async () => {
     document.querySelectorAll('#tbFixos .cf-del').forEach(b => b.onclick = async () => { const tr = b.closest('tr'); if (!confirm(`Remover "${tr.querySelector('.cf-nome').value}"?`)) return; await post(`/api/admin/custos-fixos/${tr.dataset.id}`, null, 'DELETE'); toast('removido'); montarTela('custos'); });
   } };
 };
+
+// ---------- 👥 Clientes (CRM) ----------
+telas.clientes = async () => {
+  const FILTROS = [['', 'todos'], ['pagantes', 'pagantes'], ['nunca_pagou', 'nunca pagou'], ['trial', 'trial'], ['mensal', 'mensal'], ['inativas', 'inativos 14d+'], ['com_telegram', 'com Telegram'], ['optin', 'aceitam ofertas']];
+  return { titulo: '👥 Clientes', sub: 'Base com os dados de todos os clientes. Clique numa linha para editar telefone, etiquetas, notas e consentimento de ofertas.', corpo: `
+    <div class="kpis" id="kpiCli"></div>
+    <div class="linha-busca"><input id="qcli" placeholder="buscar nome, empresa, e-mail, telefone, CPF/CNPJ, etiqueta…" style="flex:1"><div class="sel-filtro" id="fcli">${FILTROS.map(([f, n]) => `<button data-f="${f}" class="${!f ? 'on' : ''}">${n}</button>`).join('')}</div><a class="btn sec" id="btCsv" href="/api/admin/clientes.csv">⬇ Exportar CSV</a></div>
+    <div class="tabela compacta" style="overflow:auto"><table><thead><tr><th>Cliente</th><th>Contato</th><th>Plano</th><th style="text-align:right">Pago</th><th style="text-align:right">Custo IA</th><th>Último uso</th><th>Canais</th><th>Etiquetas</th><th>Desde</th></tr></thead><tbody id="tbcli"><tr><td colspan="9">carregando…</td></tr></tbody></table></div>
+    <dialog id="dlgCli" style="max-width:520px;width:calc(100% - 32px);border:1px solid var(--linha);border-radius:14px;padding:22px"></dialog>`,
+  depois() {
+    let filtro = '', q = '', rows = [];
+    const urlCsv = () => `/api/admin/clientes.csv?filtro=${filtro}&q=${encodeURIComponent(q)}`;
+    const render = async () => {
+      rows = await api(`/api/admin/clientes?filtro=${filtro}&q=${encodeURIComponent(q)}`); $('#btCsv').href = urlCsv();
+      const pagantes = rows.filter(r => r.compras > 0); const receita = rows.reduce((s, r) => s + (r.total_pago || 0), 0);
+      $('#kpiCli').innerHTML = `<div class="kpi"><div class="r">Clientes na lista</div><div class="v">${fmtN(rows.length)}</div><div class="s">${pagantes.length} pagantes</div></div><div class="kpi"><div class="r">Receita acumulada</div><div class="v">${fmtR(receita)}</div><div class="s">ticket médio ${fmtR(pagantes.length ? receita / pagantes.length : 0)}</div></div><div class="kpi"><div class="r">Aceitam ofertas</div><div class="v">${fmtN(rows.filter(r => r.marketing_optin === 1).length)}</div><div class="s">de ${rows.length}</div></div><div class="kpi"><div class="r">Telegram vinculado</div><div class="v">${fmtN(rows.filter(r => r.tem_telegram).length)}</div><div class="s">recebem pelo bot</div></div>`;
+      $('#tbcli').innerHTML = rows.map(r => `<tr data-id="${r.id}" style="cursor:pointer"><td><b>${esc(r.nome_dono)}</b>${r.admin ? ' 👑' : ''}<br><small style="color:var(--mudo)">${esc(r.empresa || '')}${r.cpf_cnpj ? ' · ' + esc(r.cpf_cnpj) : ''}</small></td><td>${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '—'}<br><small>${r.telefone ? `<a href="https://wa.me/55${String(r.telefone).replace(/\D/g, '').replace(/^55/, '')}" target="_blank" rel="noopener">📱 ${esc(r.telefone)}</a>` : '<span style="color:var(--mudo)">sem telefone</span>'}</small></td><td>${esc(PLANO[r.plano] || r.plano || '—')}<br><span class="${STATUS[r.status] || 'tag'}">${esc(r.status)}</span></td><td style="text-align:right">${fmtR(r.total_pago)}<br><small style="color:var(--mudo)">${r.compras} compra(s)</small></td><td style="text-align:right">${fmtR(r.custo_ia_brl)}</td><td>${r.ultimo_uso ? diaBr(r.ultimo_uso) : '—'}</td><td>${r.email ? '✉️' : ''} ${r.tem_telegram ? '✈️' : ''}<br><small>${r.marketing_optin === 1 ? '<span class="tag ok">ofertas ✓</span>' : '<span class="tag">sem ofertas</span>'}</small></td><td>${(r.tags || '').split(',').filter(Boolean).map(t => `<span class="tag">${esc(t.trim())}</span>`).join(' ')}</td><td>${diaBr(r.criado_em)}</td></tr>`).join('') || '<tr><td colspan="9">Nenhum cliente.</td></tr>';
+      document.querySelectorAll('#tbcli tr[data-id]').forEach(tr => tr.onclick = (e) => { if (e.target.closest('a')) return; editar(rows.find(r => r.id === Number(tr.dataset.id))); });
+    };
+    const editar = (r) => {
+      const d = $('#dlgCli');
+      d.innerHTML = `<h3 style="margin-top:0">${esc(r.nome_dono)} <small style="color:var(--mudo);font-weight:400">#${r.id}</small></h3>
+        <div class="campo"><label>Empresa</label><input id="ceEmp" value="${esc(r.empresa || '')}"></div>
+        <div class="campo"><label>E-mail</label><input id="ceEmail" type="email" value="${esc(r.email || '')}"></div>
+        <div class="campo"><label>WhatsApp / telefone</label><input id="ceTel" value="${esc(r.telefone || '')}" placeholder="(47) 99999-9999"></div>
+        <div class="campo"><label>Etiquetas (separe por vírgula)</label><input id="ceTags" value="${esc(r.tags || '')}" placeholder="ex.: têxtil, indicação, vip"></div>
+        <div class="campo"><label>Notas</label><textarea id="ceNotas" rows="4">${esc(r.notas || '')}</textarea></div>
+        <label style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" id="ceOpt"${r.marketing_optin === 1 ? ' checked' : ''}> Aceita receber ofertas e lançamentos</label>
+        <p class="d" style="margin:0 0 12px">${r.marketing_optin_em ? 'Consentimento atualizado em ' + diaBr(r.marketing_optin_em) + '. ' : ''}Só marque se o cliente pediu — é registro de consentimento (LGPD).</p>
+        <p class="d">Pago: <b>${fmtR(r.total_pago)}</b> em ${r.compras} compra(s) · última ${r.ultima_compra ? diaBr(r.ultima_compra) : '—'} · custo IA ${fmtR(r.custo_ia_brl)} · saldo ${fmtC(r.saldo)} créd.</p>
+        <p style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:0"><button class="btn sec" id="ceConta">Abrir conta</button><button class="btn sec" id="ceFechar">Fechar</button><button class="btn prim" id="ceSalvar">Salvar</button></p>`;
+      d.showModal();
+      $('#ceFechar').onclick = () => d.close();
+      $('#ceConta').onclick = () => { d.close(); abrirConta(r.id); };
+      $('#ceSalvar').onclick = async () => { const corpo = { empresa: $('#ceEmp').value, email: $('#ceEmail').value, telefone: $('#ceTel').value, tags: $('#ceTags').value, notas: $('#ceNotas').value }; if ($('#ceOpt').checked !== (r.marketing_optin === 1)) corpo.marketing_optin = $('#ceOpt').checked; const x = await post(`/api/admin/clientes/${r.id}`, corpo); if (x.ok) { toast('✅ salvo'); d.close(); render(); } };
+    };
+    $('#qcli').oninput = (e) => { q = e.target.value; clearTimeout(window._bcli); window._bcli = setTimeout(render, 250); };
+    $('#fcli').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; filtro = b.dataset.f; document.querySelectorAll('#fcli button').forEach(x => x.classList.toggle('on', x === b)); render(); };
+    render();
+  } };
+};
+
+// ---------- 📣 Campanhas (e-mail + Telegram) ----------
+telas.campanhas = async () => {
+  const hist = await api('/api/admin/campanhas');
+  const PUBLICOS = [['ativas', 'Contas ativas'], ['todas', 'Todas as contas'], ['pagantes', 'Quem já pagou'], ['nunca_pagou', 'Nunca pagou'], ['trial', 'Em trial'], ['mensal', 'Plano mensal'], ['inativas', 'Inativas há 14+ dias'], ['bloqueadas', 'Bloqueadas (saldo zerado)']];
+  const ST = { rascunho: 'tag', enviando: 'tag warn', concluida: 'tag ok', erro: 'tag off' };
+  return { titulo: '📣 Campanhas', sub: 'Mande avisos, ofertas e lançamentos por e-mail e/ou Telegram para a sua base de clientes.', corpo: `
+    <div class="grade">
+      <form id="fCamp" class="cartao" style="grid-column:1/-1">
+        <div class="linha2">
+          <div class="campo"><label>Tipo</label><select name="tipo"><option value="aviso">Aviso do serviço (todos recebem)</option><option value="oferta">Oferta / lançamento (só quem aceitou)</option></select></div>
+          <div class="campo"><label>Público</label><select name="filtro">${PUBLICOS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}<option value="tag:">Por etiqueta…</option></select><input name="tag" placeholder="nome da etiqueta" class="oculto" style="margin-top:6px"></div>
+        </div>
+        <div class="campo"><label>Canais</label><label style="display:inline-flex;gap:6px;margin-right:16px"><input type="checkbox" name="canais" value="email" checked> ✉️ E-mail</label><label style="display:inline-flex;gap:6px"><input type="checkbox" name="canais" value="telegram" checked> ✈️ Telegram</label></div>
+        <div class="campo"><label>Título (aparece no topo do e-mail e no Telegram)</label><input name="titulo" placeholder="ex.: Chegou o Fiel para WhatsApp"></div>
+        <div class="campo"><label>Assunto do e-mail</label><input name="assunto" placeholder="ex.: {nome}, sua equipe agora atende no WhatsApp"></div>
+        <div class="campo"><label>Mensagem</label><textarea name="texto" rows="8" required placeholder="Oi {nome}!&#10;&#10;Escreva aqui. Use *negrito* e cole links normalmente.&#10;&#10;{nome} = primeiro nome · {empresa} = empresa do cliente"></textarea></div>
+        <div class="cartao" id="previa" style="background:var(--fundo-2,#FAF5EC);margin:8px 0">calculando público…</div>
+        <p style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sec" id="btTeste">Enviar teste só para mim</button><button class="btn prim" id="btEnviar">Enviar campanha</button><span class="salvo" id="campMsg"></span></p>
+        <p class="d">Ofertas vão só para quem aceitou no cadastro (ou pediu "receber ofertas" no Telegram), e cada e-mail de oferta leva link de descadastro — exigência da LGPD e da nossa Política de Privacidade. Avisos do serviço vão para todos do público.</p>
+      </form>
+      <div class="cartao" style="grid-column:1/-1"><h3>Histórico</h3><div class="tabela compacta"><table><thead><tr><th>Data</th><th>Título / assunto</th><th>Tipo</th><th>Canais</th><th>Público</th><th style="text-align:right">E-mail ✓</th><th style="text-align:right">Telegram ✓</th><th style="text-align:right">Falhas</th><th>Status</th><th></th></tr></thead><tbody>${hist.map(c => `<tr><td>${diaBr(c.enviado_em || c.criado_em)}</td><td>${esc(c.titulo || c.assunto || c.texto.slice(0, 40))}</td><td>${c.tipo === 'oferta' ? 'oferta' : 'aviso'}</td><td>${esc(c.canais.replace('email', '✉️').replace('telegram', '✈️').replace(',', ' '))}</td><td>${esc(c.filtro)}</td><td style="text-align:right">${c.ok_email}</td><td style="text-align:right">${c.ok_telegram}</td><td style="text-align:right">${c.falhas ? `<b style="color:#B4232A">${c.falhas}</b>` : 0}</td><td><span class="${ST[c.status] || 'tag'}">${esc(c.status)}</span></td><td><button class="minibtn" data-env="${c.id}">detalhes</button></td></tr>`).join('') || '<tr><td colspan="10">Nenhuma campanha enviada ainda.</td></tr>'}</tbody></table></div><div id="envios"></div></div>
+    </div>`,
+  depois() {
+    const f = $('#fCamp');
+    const dados = () => { const x = Object.fromEntries(new FormData(f)); x.canais = [...f.querySelectorAll('input[name=canais]:checked')].map(i => i.value); if (x.filtro === 'tag:') x.filtro = 'tag:' + (x.tag || '').trim(); return x; };
+    const previa = async () => {
+      const d = dados(); if (!d.canais.length) { $('#previa').innerHTML = '⚠️ Escolha ao menos um canal.'; return; }
+      const p = await post('/api/admin/campanhas/previa', d);
+      $('#previa').innerHTML = `<b>Vai receber:</b> ${d.canais.includes('email') ? `✉️ <b>${p.email}</b> por e-mail` : ''}${d.canais.length > 1 ? ' · ' : ''}${d.canais.includes('telegram') ? `✈️ <b>${p.telegram}</b> pelo Telegram` : ''} <small style="color:var(--mudo)">(público: ${p.total_publico} conta(s)${d.tipo === 'oferta' ? ` · ${p.sem_consentimento} sem consentimento de ofertas ficam de fora` : ''})</small>${d.canais.includes('email') && !p.smtp ? '<br><b style="color:#B4232A">⚠️ E-mail ainda não configurado no servidor (SMTP) — os e-mails vão falhar. O Telegram funciona normalmente.</b>' : ''}`;
+    };
+    f.filtro.onchange = () => { f.tag.classList.toggle('oculto', f.filtro.value !== 'tag:'); previa(); };
+    f.querySelectorAll('select, input[type=checkbox]').forEach(el => el.addEventListener('change', previa)); f.tag.oninput = () => { clearTimeout(window._pt); window._pt = setTimeout(previa, 300); };
+    $('#btTeste').onclick = async () => { const d = dados(); if (!d.texto?.trim()) return toast('Escreva a mensagem'); $('#campMsg').textContent = 'enviando teste…'; const r = await post('/api/admin/campanhas/teste', d); $('#campMsg').textContent = [r.email && `e-mail: ${r.email}`, r.telegram && `telegram: ${r.telegram}`].filter(Boolean).join(' · ') || 'nada enviado'; };
+    f.onsubmit = async (e) => { e.preventDefault(); const d = dados(); await previa(); if (!confirm(`Enviar "${d.titulo || d.assunto || 'campanha'}" agora?\n\n${$('#previa').innerText}`)) return; $('#campMsg').textContent = 'disparando…'; const r = await post('/api/admin/campanhas', d); if (r.ok) { toast(`✅ campanha na fila: ${r.total} envio(s)`); setTimeout(() => montarTela('campanhas'), 1500); } else $('#campMsg').textContent = ''; };
+    document.querySelectorAll('button[data-env]').forEach(b => b.onclick = async () => { const rows = await api(`/api/admin/campanhas/${b.dataset.env}/envios`); $('#envios').innerHTML = `<h4 style="margin:16px 0 8px">Envios da campanha #${b.dataset.env}</h4><div class="tabela compacta"><table><thead><tr><th>Cliente</th><th>Canal</th><th>Destino</th><th>Status</th><th>Erro</th><th>Quando</th></tr></thead><tbody>${rows.map(x => `<tr><td>${esc(x.nome_dono || '#' + x.conta_id)}</td><td>${x.canal}</td><td>${esc(x.destino)}</td><td><span class="tag ${x.status === 'ok' ? 'ok' : 'off'}">${x.status}</span></td><td>${esc(x.erro || '')}</td><td>${diaBr(x.enviado_em)}</td></tr>`).join('') || '<tr><td colspan="6">Sem envios.</td></tr>'}</tbody></table></div>`; });
+    previa();
+  } };
+};

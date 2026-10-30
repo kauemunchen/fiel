@@ -14,6 +14,9 @@ export async function tratarMensagem(msg, canal) {
   const conta = await obterConta(msg.chatId);
   if (!conta) return (await tentarEntrar(msg)) || onboarding(msg);
   contextoUso.contaId = conta.id; contextoUso.modulo = null;
+  { const t = (msg.texto || '').trim().toLowerCase();
+    if (/^(parar|cancelar|sair das?) ofertas?$/.test(t)) { db.prepare('UPDATE contas SET marketing_optin=0, marketing_optin_em=CURRENT_TIMESTAMP WHERE id=?').run(conta.id); return 'Pronto — você não vai mais receber ofertas e lançamentos. Comunicados importantes do serviço continuam chegando. Para voltar, mande *receber ofertas*.'; }
+    if (/^(receber|quero) ofertas?$/.test(t)) { db.prepare('UPDATE contas SET marketing_optin=1, marketing_optin_em=CURRENT_TIMESTAMP WHERE id=?').run(conta.id); return '✅ Combinado — você vai receber novidades, ofertas e lançamentos do Fiel. Para parar, mande *parar ofertas*.'; } }
   const usuario = obterUsuario(msg.chatId);
   if (usuario && usuario.papel !== 'dono') return fluxoColaborador(msg, conta, usuario);
   // Créditos: sem saldo, só comandos livres (status, créditos, sim/não, login web…)

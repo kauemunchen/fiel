@@ -25,6 +25,8 @@ export function rotasAdmin(app) {
     req.contaId = s.conta_id; next();
   };
 
+  import('./api-clientes.js').then(m => m.rotasClientes(app, auth, logAdmin)).catch(e => console.error('[admin] clientes', e.message));
+
   // Painel inicial — números e séries dos últimos 30 dias
   app.get('/api/admin/resumo', auth, (req, res) => {
     const q = (sql, ...a) => db.prepare(sql).get(...a); const l = (sql, ...a) => db.prepare(sql).all(...a);

@@ -63,6 +63,7 @@ export class WebCanal {
     const _val = (s) => _doc ? _doc.docValido(s) : (_norm(s).length === 11 || _norm(s).length === 14);
     app.post('/api/cadastro', async (req, res) => {
       const b = req.body || {}; const nome = limpar(b.nome), empresa = limpar(b.empresa) || nome, email = limpar(b.email).toLowerCase(), senha = String(b.senha || ''), cpfCnpj = limpar(b.cpf_cnpj).replace(/\D/g, '');
+      const telefone = limpar(b.telefone).replace(/[^\d+() -]/g, '').slice(0, 30) || null; const optin = [true, 'on', 1, '1'].includes(b.marketing_optin) ? 1 : 0;
       const aceite = b.aceite_termos === true || b.aceite_termos === 'on' || b.aceite_termos === 1 || b.aceite_termos === '1';
       if (!nome || nome.length < 2) return res.status(400).json({ erro: 'informe seu nome' });
       if (!emailOk(email)) return res.status(400).json({ erro: 'e-mail inválido' });
@@ -73,6 +74,7 @@ export class WebCanal {
       if (db.prepare('SELECT id FROM contas WHERE cpf_cnpj=?').get(_norm(cpfCnpj))) return res.status(400).json({ erro: 'Esse CPF/CNPJ já está cadastrado em outra conta.' });
       const r = db.prepare('INSERT INTO contas (nome_dono, empresa, cpf_cnpj, email, aceite_termos_em, aceite_termos_versao, aceite_termos_ip) VALUES (?,?,?,?,?,?,?)').run(nome, empresa, _norm(cpfCnpj), email, new Date().toISOString(), '1.0', String(req.ip || req.headers['x-forwarded-for'] || '').slice(0, 64));
       const contaId = Number(r.lastInsertRowid);
+      try { db.prepare('UPDATE contas SET telefone=?, marketing_optin=?, marketing_optin_em=CURRENT_TIMESTAMP WHERE id=?').run(telefone, optin, contaId); } catch (e) { console.error('[cadastro] extras', e.message); }
       // Primeira conta do banco vira admin ilimitado automaticamente
       if (!db.prepare('SELECT id FROM contas WHERE admin=1 AND id<>?').get(contaId)) db.prepare("UPDATE contas SET admin=1, plano='ilimitado' WHERE id=?").run(contaId);
       const chatSinteico = `web:${contaId}`; db.prepare('INSERT INTO usuarios (conta_id, canal, chat_id, nome, papel, email, senha_hash) VALUES (?,?,?,?,?,?,?)').run(contaId, 'web', chatSinteico, nome, 'dono', email, hash(senha));
