@@ -13,6 +13,7 @@ export function prepararClientes() {
       admin_id INTEGER, criado_em TEXT DEFAULT CURRENT_TIMESTAMP, enviado_em TEXT, concluido_em TEXT);
     CREATE TABLE IF NOT EXISTS campanha_envios (id INTEGER PRIMARY KEY, campanha_id INTEGER, conta_id INTEGER, canal TEXT, destino TEXT, status TEXT, erro TEXT, enviado_em TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE INDEX IF NOT EXISTS ix_camp_envios ON campanha_envios (campanha_id)`);
+  for (const [c, def] of [['botao_texto', 'TEXT'], ['botao_url', 'TEXT'], ['preheader', 'TEXT']]) { try { db.exec(`ALTER TABLE campanhas ADD COLUMN ${c} ${def}`); } catch {} }
 }
 prepararClientes();
 
@@ -75,18 +76,26 @@ const paraHtml = (t) => String(t).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&
   .replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#E85D4A">$1</a>')
   .split(/\n{2,}/).map(p => `<p style="margin:0 0 14px;line-height:1.55">${p.replace(/\n/g, '<br>')}</p>`).join('');
 
-async function enviarEmailCliente(camp, r) {
-  const { enviarEmail, moldura } = await import('../integracoes/email.js');
+/** Monta o e-mail de campanha (HTML + texto) — usado no envio real, no teste e na pré-visualização do admin. */
+export async function montarEmailCampanha(camp, r) {
+  const { moldura } = await import('../integracoes/email.js');
   const texto = personalizar(camp.texto, r);
-  const desc = camp.tipo === 'oferta' ? `${base()}/descadastrar?t=${tokenDescadastro(r.id)}` : null;
-  const rodape = desc ? `Fiel · usefiel.com · Você recebe porque aceitou novidades e ofertas. <a href="${desc}" style="color:#7A7D87">Não quero mais receber</a>` : 'Fiel · Delegue. Fiel resolve. · usefiel.com — comunicado sobre o serviço que você usa.';
-  await enviarEmail({ para: r.email, assunto: personalizar(camp.assunto || camp.titulo || 'Novidade do Fiel', r),
-    texto: texto + (desc ? `\n\n—\nPara não receber mais ofertas: ${desc}` : ''),
-    html: moldura({ titulo: personalizar(camp.titulo || camp.assunto || 'Fiel', r), corpoHtml: paraHtml(texto), rodape }) });
+  const desc = camp.tipo === 'oferta' && r.id ? `${base()}/descadastrar?t=${tokenDescadastro(r.id)}` : (camp.tipo === 'oferta' ? `${base()}/descadastrar` : null);
+  const nota = desc ? `Você recebe ofertas do Fiel porque aceitou no cadastro. <a href="${desc}" style="color:#E4DFF2">Não quero mais receber</a>.` : 'Comunicado sobre o serviço Fiel que você usa.';
+  const botao = camp.botao_texto && camp.botao_url ? { texto: personalizar(camp.botao_texto, r), url: camp.botao_url } : null;
+  const assunto = personalizar(camp.assunto || camp.titulo || 'Novidade do Fiel', r);
+  const html = moldura({ titulo: personalizar(camp.titulo || '', r), corpoHtml: paraHtml(texto), nota, botao, preheader: personalizar(camp.preheader || texto.replace(/\s+/g, ' ').slice(0, 110), r) });
+  const txt = texto + (botao ? `\n\n${botao.texto}: ${botao.url}` : '') + (desc ? `\n\n—\nPara não receber mais ofertas: ${desc}` : '') + '\n\nFiel · Delegue. Fiel resolve. · usefiel.com';
+  return { assunto, html, texto: txt };
+}
+async function enviarEmailCliente(camp, r) {
+  const { enviarEmail } = await import('../integracoes/email.js');
+  const m = await montarEmailCampanha(camp, r);
+  await enviarEmail({ para: r.email, assunto: m.assunto, texto: m.texto, html: m.html });
 }
 async function enviarTelegramCliente(camp, r) {
   const { canalAtual } = await import('./atual.js'); const c = canalAtual(); if (!c) throw new Error('canal indisponível');
-  const msg = `📣 *Fiel*${camp.titulo ? ` — ${personalizar(camp.titulo, r)}` : ''}\n\n${personalizar(camp.texto, r)}${camp.tipo === 'oferta' ? '\n\n_Para não receber ofertas, responda "parar ofertas"._' : ''}`;
+  const msg = `📣 *Fiel*${camp.titulo ? ` — ${personalizar(camp.titulo, r)}` : ''}\n\n${personalizar(camp.texto, r)}${camp.botao_texto && camp.botao_url ? `\n\n👉 ${personalizar(camp.botao_texto, r)}: ${camp.botao_url}` : ''}${camp.tipo === 'oferta' ? '\n\n_Para não receber ofertas, responda "parar ofertas"._' : ''}`;
   await c.enviar(null, r.telegram_id, msg); // hub: entra também no histórico do app web
 }
 
@@ -129,10 +138,17 @@ export function rotasClientes(app, auth, logAdmin) {
     let smtp = false; try { smtp = (await import('../integracoes/email.js')).emailConfigurado(); } catch {}
     res.json({ total_publico: p.total_publico, sem_consentimento: p.sem_consentimento, email: p.email.length, telegram: p.telegram.length, smtp });
   });
+  app.post('/api/admin/campanhas/render', auth, async (req, res) => {
+    const b = req.body || {}; const exemplo = { id: 0, nome_dono: 'Maria Souza', empresa: 'Ateliê Exemplo' };
+    const camp = { titulo: b.titulo, assunto: b.assunto, texto: b.texto || 'Escreva a mensagem ao lado para ver a prévia.', tipo: b.tipo, botao_texto: b.botao_texto, botao_url: b.botao_url, preheader: b.preheader };
+    const m = await montarEmailCampanha(camp, exemplo);
+    const tg = `📣 *Fiel*${camp.titulo ? ` — ${personalizar(camp.titulo, exemplo)}` : ''}\n\n${personalizar(camp.texto, exemplo)}${camp.botao_texto && camp.botao_url ? `\n\n👉 ${personalizar(camp.botao_texto, exemplo)}: ${camp.botao_url}` : ''}${camp.tipo === 'oferta' ? '\n\n_Para não receber ofertas, responda "parar ofertas"._' : ''}`;
+    res.json({ assunto: m.assunto, html: m.html, telegram: tg });
+  });
   app.post('/api/admin/campanhas/teste', auth, async (req, res) => {
     const b = req.body || {}; const canais = [].concat(b.canais || []);
     const eu = (await listarClientes()).find(r => r.id === req.contaId); if (!eu) return res.status(400).json({ erro: 'conta admin não encontrada' });
-    const camp = { titulo: b.titulo, assunto: `[TESTE] ${b.assunto || b.titulo || ''}`, texto: b.texto, tipo: b.tipo };
+    const camp = { titulo: b.titulo, assunto: `[TESTE] ${b.assunto || b.titulo || ''}`, texto: b.texto, tipo: b.tipo, botao_texto: b.botao_texto, botao_url: b.botao_url, preheader: b.preheader };
     const r = { email: null, telegram: null };
     if (canais.includes('email')) { try { if (!eu.email) throw new Error('sua conta não tem e-mail'); await enviarEmailCliente(camp, eu); r.email = `ok → ${eu.email}`; } catch (e) { r.email = 'falhou: ' + e.message; } }
     if (canais.includes('telegram')) { try { if (!eu.tem_telegram) throw new Error('sua conta não tem Telegram vinculado'); await enviarTelegramCliente(camp, eu); r.telegram = 'ok'; } catch (e) { r.telegram = 'falhou: ' + e.message; } }
@@ -144,7 +160,8 @@ export function rotasClientes(app, auth, logAdmin) {
     if (!canais.length) return res.status(400).json({ erro: 'escolha ao menos um canal' });
     if (canais.includes('email') && !b.assunto) return res.status(400).json({ erro: 'e-mail precisa de assunto' });
     const tipo = b.tipo === 'oferta' ? 'oferta' : 'aviso';
-    const id = Number(db.prepare('INSERT INTO campanhas (titulo, assunto, texto, tipo, canais, filtro, admin_id) VALUES (?,?,?,?,?,?,?)').run(b.titulo || null, b.assunto || null, String(b.texto), tipo, canais.join(','), b.filtro || 'ativas', req.contaId).lastInsertRowid);
+    if ((b.botao_texto && !b.botao_url) || (!b.botao_texto && b.botao_url)) return res.status(400).json({ erro: 'botão precisa de texto e link' });
+    const id = Number(db.prepare('INSERT INTO campanhas (titulo, assunto, texto, tipo, canais, filtro, admin_id, botao_texto, botao_url, preheader) VALUES (?,?,?,?,?,?,?,?,?,?)').run(b.titulo || null, b.assunto || null, String(b.texto), tipo, canais.join(','), b.filtro || 'ativas', req.contaId, b.botao_texto || null, b.botao_url || null, b.preheader || null).lastInsertRowid);
     await dispararCampanha(id); logAdmin(req.contaId, 'campanha.enviar', id, { tipo, canais, filtro: b.filtro });
     res.json({ ok: true, id, ...db.prepare('SELECT total FROM campanhas WHERE id=?').get(id) });
   });

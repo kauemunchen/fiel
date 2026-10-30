@@ -21,3 +21,51 @@
 .minibtn:hover{border-color:var(--ouro)}
 .minibtn.perigo{color:#E25D5D;border-color:#E25D5D;background:transparent}
 #lateral .menu a{cursor:pointer}
+
+/* ---------- Campanhas ---------- */
+.camp-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:1100px){.camp-grid{grid-template-columns:1fr}}
+.camp-form{padding:22px}
+.camp-sec{display:flex;align-items:center;gap:10px;margin:22px 0 8px}
+.camp-sec:first-child{margin-top:0}
+.camp-sec h3{margin:0;font-family:var(--f-display);font-weight:500;font-size:18px}
+.camp-n{width:24px;height:24px;border-radius:50%;background:var(--coral);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;flex-shrink:0}
+.camp-seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:4px 0 6px}
+.camp-seg label{cursor:pointer}
+.camp-seg input,.camp-chip input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.camp-seg span{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1px solid var(--sec);border-radius:12px;background:var(--fundo);transition:border-color .15s,background .15s}
+.camp-seg span b{font-size:14px}
+.camp-seg span small{color:var(--mudo);font-size:12px}
+.camp-seg input:checked+span{border-color:var(--coral);background:var(--coral-leve);box-shadow:inset 0 0 0 1px var(--coral)}
+.camp-seg input:focus-visible+span,.camp-chip input:focus-visible+span{outline:2px solid var(--coral);outline-offset:2px}
+.camp-chips{display:flex;gap:8px;flex-wrap:wrap}
+.camp-chip span{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--sec);border-radius:999px;font-size:13px;font-style:normal;font-family:inherit;cursor:pointer;color:var(--mudo);background:var(--fundo);user-select:none}
+.camp-chip input:checked+span{border-color:var(--coral);color:var(--texto);background:var(--coral-leve);font-weight:600}
+.camp-publico{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 2px;padding:12px;border:1px dashed var(--sec);border-radius:12px;background:var(--fundo);color:var(--texto);font-size:13px}
+.camp-num{display:flex;flex-direction:column;min-width:96px;padding:6px 10px;border-radius:10px;background:var(--card)}
+.camp-num b{font-size:22px;font-weight:700;color:var(--texto);line-height:1.1}
+.camp-num span{font-size:11px;color:var(--mudo)}
+.camp-num.mudo b{color:var(--mudo)}
+.camp-alerta{flex-basis:100%;color:#E25D5D;font-size:12.5px;font-weight:600}
+.camp-vars{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--mudo)}
+.camp-vars button{font:inherit;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;padding:3px 8px;border:1px solid var(--sec);border-radius:6px;background:var(--fundo);color:var(--texto);cursor:pointer}
+.camp-vars button:hover{border-color:var(--coral)}
+.camp-acoes{display:flex;gap:8px;flex-wrap:wrap}
+.camp-msg{min-height:18px;margin:8px 0 0;font-size:13px}
+.camp-msg.ok{color:var(--mudo)}.camp-msg.erro{color:#E25D5D}
+.camp-lgpd{font-size:12px;margin-top:10px}
+.camp-prev{position:sticky;top:12px}
+.camp-tabs{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.camp-tabs button{font:inherit;font-size:13px;padding:6px 12px;border:1px solid var(--sec);border-radius:999px;background:transparent;color:var(--mudo);cursor:pointer}
+.camp-tabs button.on{background:var(--texto);color:var(--fundo);border-color:var(--texto);font-weight:600}
+.camp-ex{margin-left:auto;font-size:11.5px;color:var(--mudo);font-style:italic}
+.camp-mail{border:1px solid var(--sec);border-radius:14px;overflow:hidden;background:#fff}
+.camp-mail-top{display:flex;gap:10px;align-items:center;padding:12px 14px;background:#fff;border-bottom:1px solid #EEE7D8;color:#17152B;font-size:13px}
+.camp-mail-top small{color:#7A7D87}
+.camp-av{width:32px;height:32px;border-radius:50%;background:#E85D4A;color:#fff;display:grid;place-items:center;font-weight:700;flex-shrink:0}
+.camp-assunto{font-weight:600;margin-top:2px}
+.camp-mail iframe{display:block;width:100%;height:760px;border:0;background:#FAF5EC}
+.camp-tg{border-radius:14px;padding:22px 16px;min-height:300px;background:#8FB28A linear-gradient(135deg,#9DBF8F,#7FA67A)}
+.camp-tg-bolha{max-width:88%;background:#fff;color:#111;border-radius:14px 14px 14px 4px;padding:10px 12px;font-size:14px;line-height:1.45;box-shadow:0 1px 1px rgba(0,0,0,.12);word-wrap:break-word}
+.camp-tg-bolha a{color:#2A7AB8}
+.campo label.camp-chip,.camp-seg label{font-style:normal;font-family:inherit;font-size:inherit;color:inherit}

@@ -280,38 +280,83 @@ telas.clientes = async () => {
 // ---------- 📣 Campanhas (e-mail + Telegram) ----------
 telas.campanhas = async () => {
   const hist = await api('/api/admin/campanhas');
-  const PUBLICOS = [['ativas', 'Contas ativas'], ['todas', 'Todas as contas'], ['pagantes', 'Quem já pagou'], ['nunca_pagou', 'Nunca pagou'], ['trial', 'Em trial'], ['mensal', 'Plano mensal'], ['inativas', 'Inativas há 14+ dias'], ['bloqueadas', 'Bloqueadas (saldo zerado)']];
+  const PUBLICOS = [['ativas', 'Contas ativas'], ['todas', 'Todas as contas'], ['pagantes', 'Quem já pagou'], ['nunca_pagou', 'Nunca pagou'], ['trial', 'Em trial'], ['mensal', 'Plano mensal'], ['inativas', 'Inativas há 14+ dias'], ['bloqueadas', 'Bloqueadas (saldo zerado)'], ['tag:', 'Por etiqueta…']];
   const ST = { rascunho: 'tag', enviando: 'tag warn', concluida: 'tag ok', erro: 'tag off' };
-  return { titulo: '📣 Campanhas', sub: 'Mande avisos, ofertas e lançamentos por e-mail e/ou Telegram para a sua base de clientes.', corpo: `
-    <div class="grade">
-      <form id="fCamp" class="cartao" style="grid-column:1/-1">
-        <div class="linha2">
-          <div class="campo"><label>Tipo</label><select name="tipo"><option value="aviso">Aviso do serviço (todos recebem)</option><option value="oferta">Oferta / lançamento (só quem aceitou)</option></select></div>
-          <div class="campo"><label>Público</label><select name="filtro">${PUBLICOS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}<option value="tag:">Por etiqueta…</option></select><input name="tag" placeholder="nome da etiqueta" class="oculto" style="margin-top:6px"></div>
-        </div>
-        <div class="campo"><label>Canais</label><label style="display:inline-flex;gap:6px;margin-right:16px"><input type="checkbox" name="canais" value="email" checked> ✉️ E-mail</label><label style="display:inline-flex;gap:6px"><input type="checkbox" name="canais" value="telegram" checked> ✈️ Telegram</label></div>
-        <div class="campo"><label>Título (aparece no topo do e-mail e no Telegram)</label><input name="titulo" placeholder="ex.: Chegou o Fiel para WhatsApp"></div>
-        <div class="campo"><label>Assunto do e-mail</label><input name="assunto" placeholder="ex.: {nome}, sua equipe agora atende no WhatsApp"></div>
-        <div class="campo"><label>Mensagem</label><textarea name="texto" rows="8" required placeholder="Oi {nome}!&#10;&#10;Escreva aqui. Use *negrito* e cole links normalmente.&#10;&#10;{nome} = primeiro nome · {empresa} = empresa do cliente"></textarea></div>
-        <div class="cartao" id="previa" style="background:var(--fundo-2,#FAF5EC);margin:8px 0">calculando público…</div>
-        <p style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn sec" id="btTeste">Enviar teste só para mim</button><button class="btn prim" id="btEnviar">Enviar campanha</button><span class="salvo" id="campMsg"></span></p>
-        <p class="d">Ofertas vão só para quem aceitou no cadastro (ou pediu "receber ofertas" no Telegram), e cada e-mail de oferta leva link de descadastro — exigência da LGPD e da nossa Política de Privacidade. Avisos do serviço vão para todos do público.</p>
-      </form>
-      <div class="cartao" style="grid-column:1/-1"><h3>Histórico</h3><div class="tabela compacta"><table><thead><tr><th>Data</th><th>Título / assunto</th><th>Tipo</th><th>Canais</th><th>Público</th><th style="text-align:right">E-mail ✓</th><th style="text-align:right">Telegram ✓</th><th style="text-align:right">Falhas</th><th>Status</th><th></th></tr></thead><tbody>${hist.map(c => `<tr><td>${diaBr(c.enviado_em || c.criado_em)}</td><td>${esc(c.titulo || c.assunto || c.texto.slice(0, 40))}</td><td>${c.tipo === 'oferta' ? 'oferta' : 'aviso'}</td><td>${esc(c.canais.replace('email', '✉️').replace('telegram', '✈️').replace(',', ' '))}</td><td>${esc(c.filtro)}</td><td style="text-align:right">${c.ok_email}</td><td style="text-align:right">${c.ok_telegram}</td><td style="text-align:right">${c.falhas ? `<b style="color:#B4232A">${c.falhas}</b>` : 0}</td><td><span class="${ST[c.status] || 'tag'}">${esc(c.status)}</span></td><td><button class="minibtn" data-env="${c.id}">detalhes</button></td></tr>`).join('') || '<tr><td colspan="10">Nenhuma campanha enviada ainda.</td></tr>'}</tbody></table></div><div id="envios"></div></div>
-    </div>`,
+  const NOME_ST = { rascunho: 'rascunho', enviando: 'enviando', concluida: 'concluída', erro: 'erro' };
+  return { titulo: '📣 Campanhas', sub: 'Avisos, ofertas e lançamentos por e-mail e Telegram — com prévia ao vivo de como chega para o cliente.', corpo: `
+  <div class="camp-grid">
+    <form id="fCamp" class="cartao camp-form" autocomplete="off">
+      <div class="camp-sec"><span class="camp-n">1</span><h3>Para quem</h3></div>
+      <div class="camp-seg" role="radiogroup">
+        <label><input type="radio" name="tipo" value="aviso" checked><span><b>Aviso do serviço</b><small>vai para todos do público</small></span></label>
+        <label><input type="radio" name="tipo" value="oferta"><span><b>Oferta / lançamento</b><small>só quem aceitou receber</small></span></label>
+      </div>
+      <div class="linha2">
+        <div class="campo"><label>Público</label><select name="filtro">${PUBLICOS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select></div>
+        <div class="campo oculto" id="campoTag"><label>Etiqueta</label><input name="tag" placeholder="ex.: vip"></div>
+      </div>
+      <div class="campo"><label>Canais</label><div class="camp-chips">
+        <label class="camp-chip"><input type="checkbox" name="canais" value="email" checked><span>✉️ E-mail</span></label>
+        <label class="camp-chip"><input type="checkbox" name="canais" value="telegram" checked><span>✈️ Telegram</span></label>
+      </div></div>
+      <div class="camp-publico" id="previa">calculando…</div>
+
+      <div class="camp-sec"><span class="camp-n">2</span><h3>Mensagem</h3></div>
+      <div class="campo"><label>Título — topo do e-mail e do Telegram</label><input name="titulo" maxlength="90" placeholder="Chegou o Fiel para WhatsApp"></div>
+      <div class="linha2">
+        <div class="campo"><label>Assunto do e-mail</label><input name="assunto" maxlength="120" placeholder="{nome}, sua equipe agora atende no WhatsApp"></div>
+        <div class="campo"><label>Prévia na caixa de entrada (opcional)</label><input name="preheader" maxlength="140" placeholder="o texto curto que aparece ao lado do assunto"></div>
+      </div>
+      <div class="campo"><label>Texto</label><textarea name="texto" rows="9" required placeholder="Oi {nome}!&#10;&#10;Escreva aqui. Linha em branco = novo parágrafo. *negrito* e links funcionam.&#10;&#10;{nome} = primeiro nome · {empresa} = empresa do cliente"></textarea>
+        <div class="camp-vars">Inserir: <button type="button" data-v="{nome}">{nome}</button> <button type="button" data-v="{empresa}">{empresa}</button> <button type="button" data-v="*negrito*">*negrito*</button></div></div>
+      <div class="linha2">
+        <div class="campo"><label>Botão — texto (opcional)</label><input name="botao_texto" maxlength="40" placeholder="Quero conhecer"></div>
+        <div class="campo"><label>Botão — link</label><input name="botao_url" type="url" placeholder="https://usefiel.com/app"></div>
+      </div>
+
+      <div class="camp-sec"><span class="camp-n">3</span><h3>Enviar</h3></div>
+      <div class="camp-acoes"><button type="button" class="btn sec" id="btTeste">Enviar teste só para mim</button><button class="btn ouro" id="btEnviar">Enviar campanha</button></div>
+      <p class="camp-msg" id="campMsg"></p>
+      <p class="d camp-lgpd">Ofertas vão só para quem aceitou no cadastro (ou mandou "receber ofertas" no Telegram) e todo e-mail de oferta leva link de descadastro — LGPD. Avisos do serviço vão para todo o público.</p>
+    </form>
+
+    <div class="camp-prev">
+      <div class="camp-tabs"><button type="button" class="on" data-p="email">✉️ E-mail</button><button type="button" data-p="telegram">✈️ Telegram</button><span class="camp-ex">exemplo com “Maria Souza”</span></div>
+      <div id="pvEmail" class="camp-mail">
+        <div class="camp-mail-top"><div class="camp-av">F</div><div><b>Fiel</b> <small>&lt;ola@usefiel.com&gt;</small><div class="camp-assunto" id="pvAssunto">—</div></div></div>
+        <iframe id="pvFrame" title="Prévia do e-mail" sandbox="allow-same-origin"></iframe>
+      </div>
+      <div id="pvTg" class="camp-tg oculto"><div class="camp-tg-bolha" id="pvTgTexto"></div></div>
+    </div>
+  </div>
+
+  <div class="cartao" style="margin-top:16px"><h3>Histórico</h3><div class="tabela compacta" style="overflow:auto"><table><thead><tr><th>Data</th><th>Campanha</th><th>Tipo</th><th>Canais</th><th>Público</th><th style="text-align:right">✉️ ok</th><th style="text-align:right">✈️ ok</th><th style="text-align:right">Falhas</th><th>Status</th><th></th></tr></thead><tbody>${hist.map(c => `<tr><td>${diaBr(c.enviado_em || c.criado_em)}</td><td><b>${esc(c.titulo || c.assunto || c.texto.slice(0, 40))}</b>${c.assunto && c.titulo ? `<br><small style="color:var(--mudo)">${esc(c.assunto)}</small>` : ''}</td><td>${c.tipo === 'oferta' ? '<span class="tag warn">oferta</span>' : '<span class="tag">aviso</span>'}</td><td>${c.canais.split(',').map(x => x === 'email' ? '✉️' : '✈️').join(' ')}</td><td>${esc(c.filtro)}</td><td style="text-align:right">${c.ok_email}</td><td style="text-align:right">${c.ok_telegram}</td><td style="text-align:right">${c.falhas ? `<b style="color:#E25D5D">${c.falhas}</b>` : 0}</td><td><span class="${ST[c.status] || 'tag'}">${NOME_ST[c.status] || esc(c.status)}</span></td><td><button class="minibtn" data-env="${c.id}">detalhes</button></td></tr>`).join('') || '<tr><td colspan="10" style="color:var(--mudo)">Nenhuma campanha enviada ainda.</td></tr>'}</tbody></table></div><div id="envios"></div></div>`,
   depois() {
     const f = $('#fCamp');
     const dados = () => { const x = Object.fromEntries(new FormData(f)); x.canais = [...f.querySelectorAll('input[name=canais]:checked')].map(i => i.value); if (x.filtro === 'tag:') x.filtro = 'tag:' + (x.tag || '').trim(); return x; };
+    const escTg = (t) => esc(t).replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/_([^_\n]+)_/g, '<i>$1</i>').replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>').replace(/\n/g, '<br>');
     const previa = async () => {
-      const d = dados(); if (!d.canais.length) { $('#previa').innerHTML = '⚠️ Escolha ao menos um canal.'; return; }
+      const d = dados(); const box = $('#previa');
+      if (!d.canais.length) { box.innerHTML = '<span class="camp-alerta">Escolha ao menos um canal.</span>'; return; }
       const p = await post('/api/admin/campanhas/previa', d);
-      $('#previa').innerHTML = `<b>Vai receber:</b> ${d.canais.includes('email') ? `✉️ <b>${p.email}</b> por e-mail` : ''}${d.canais.length > 1 ? ' · ' : ''}${d.canais.includes('telegram') ? `✈️ <b>${p.telegram}</b> pelo Telegram` : ''} <small style="color:var(--mudo)">(público: ${p.total_publico} conta(s)${d.tipo === 'oferta' ? ` · ${p.sem_consentimento} sem consentimento de ofertas ficam de fora` : ''})</small>${d.canais.includes('email') && !p.smtp ? '<br><b style="color:#B4232A">⚠️ E-mail ainda não configurado no servidor (SMTP) — os e-mails vão falhar. O Telegram funciona normalmente.</b>' : ''}`;
+      box.innerHTML = `<div class="camp-num"><b>${p.total_publico}</b><span>no público</span></div>${d.canais.includes('email') ? `<div class="camp-num"><b>${p.email}</b><span>✉️ por e-mail</span></div>` : ''}${d.canais.includes('telegram') ? `<div class="camp-num"><b>${p.telegram}</b><span>✈️ no Telegram</span></div>` : ''}${d.tipo === 'oferta' && p.sem_consentimento ? `<div class="camp-num mudo"><b>${p.sem_consentimento}</b><span>sem aceite de ofertas (fora)</span></div>` : ''}${d.canais.includes('email') && !p.smtp ? '<div class="camp-alerta">E-mail não configurado no servidor (SMTP) — só o Telegram vai sair.</div>' : ''}`;
     };
-    f.filtro.onchange = () => { f.tag.classList.toggle('oculto', f.filtro.value !== 'tag:'); previa(); };
-    f.querySelectorAll('select, input[type=checkbox]').forEach(el => el.addEventListener('change', previa)); f.tag.oninput = () => { clearTimeout(window._pt); window._pt = setTimeout(previa, 300); };
-    $('#btTeste').onclick = async () => { const d = dados(); if (!d.texto?.trim()) return toast('Escreva a mensagem'); $('#campMsg').textContent = 'enviando teste…'; const r = await post('/api/admin/campanhas/teste', d); $('#campMsg').textContent = [r.email && `e-mail: ${r.email}`, r.telegram && `telegram: ${r.telegram}`].filter(Boolean).join(' · ') || 'nada enviado'; };
-    f.onsubmit = async (e) => { e.preventDefault(); const d = dados(); await previa(); if (!confirm(`Enviar "${d.titulo || d.assunto || 'campanha'}" agora?\n\n${$('#previa').innerText}`)) return; $('#campMsg').textContent = 'disparando…'; const r = await post('/api/admin/campanhas', d); if (r.ok) { toast(`✅ campanha na fila: ${r.total} envio(s)`); setTimeout(() => montarTela('campanhas'), 1500); } else $('#campMsg').textContent = ''; };
-    document.querySelectorAll('button[data-env]').forEach(b => b.onclick = async () => { const rows = await api(`/api/admin/campanhas/${b.dataset.env}/envios`); $('#envios').innerHTML = `<h4 style="margin:16px 0 8px">Envios da campanha #${b.dataset.env}</h4><div class="tabela compacta"><table><thead><tr><th>Cliente</th><th>Canal</th><th>Destino</th><th>Status</th><th>Erro</th><th>Quando</th></tr></thead><tbody>${rows.map(x => `<tr><td>${esc(x.nome_dono || '#' + x.conta_id)}</td><td>${x.canal}</td><td>${esc(x.destino)}</td><td><span class="tag ${x.status === 'ok' ? 'ok' : 'off'}">${x.status}</span></td><td>${esc(x.erro || '')}</td><td>${diaBr(x.enviado_em)}</td></tr>`).join('') || '<tr><td colspan="6">Sem envios.</td></tr>'}</tbody></table></div>`; });
-    previa();
+    const render = async () => {
+      const d = dados(); const r = await post('/api/admin/campanhas/render', d);
+      $('#pvAssunto').textContent = r.assunto || '(sem assunto)';
+      const fr = $('#pvFrame'); fr.srcdoc = r.html; fr.onload = () => { try { fr.style.height = (fr.contentDocument.body.scrollHeight + 4) + 'px'; } catch { fr.style.height = '900px'; } };
+      $('#pvTgTexto').innerHTML = escTg(r.telegram || '');
+    };
+    let t1, t2; const agendar = () => { clearTimeout(t1); t1 = setTimeout(render, 350); };
+    f.addEventListener('input', agendar);
+    f.addEventListener('change', (e) => { if (e.target.name === 'filtro') $('#campoTag').classList.toggle('oculto', e.target.value !== 'tag:'); if (['tipo', 'filtro', 'canais'].includes(e.target.name)) previa(); agendar(); });
+    f.tag.addEventListener('input', () => { clearTimeout(t2); t2 = setTimeout(previa, 350); });
+    document.querySelectorAll('.camp-vars button').forEach(b => b.onclick = () => { const ta = f.texto; const [a, z] = [ta.selectionStart, ta.selectionEnd]; ta.setRangeText(b.dataset.v, a, z, 'end'); ta.focus(); agendar(); });
+    document.querySelectorAll('.camp-tabs button').forEach(b => b.onclick = () => { document.querySelectorAll('.camp-tabs button').forEach(x => x.classList.toggle('on', x === b)); $('#pvEmail').classList.toggle('oculto', b.dataset.p !== 'email'); $('#pvTg').classList.toggle('oculto', b.dataset.p !== 'telegram'); });
+    const msg = (t, ok = true) => { const el = $('#campMsg'); el.textContent = t; el.className = 'camp-msg ' + (ok ? 'ok' : 'erro'); };
+    $('#btTeste').onclick = async () => { const d = dados(); if (!d.texto?.trim()) return msg('Escreva a mensagem antes do teste.', false); if (!d.canais.length) return msg('Escolha um canal.', false); msg('Enviando teste…'); const r = await post('/api/admin/campanhas/teste', d); const partes = [r.email && `E-mail: ${r.email}`, r.telegram && `Telegram: ${r.telegram}`].filter(Boolean); msg(partes.join(' · ') || 'Nada enviado.', !/falhou/.test(partes.join())); };
+    f.onsubmit = async (e) => { e.preventDefault(); const d = dados(); await previa(); const resumo = [...document.querySelectorAll('#previa .camp-num')].map(x => x.innerText.replace('\n', ' ')).join(' · '); if (!confirm(`Enviar "${d.titulo || d.assunto || 'campanha'}" agora?\n\n${resumo}`)) return; msg('Disparando…'); const r = await post('/api/admin/campanhas', d); if (r.ok) { toast(`✅ campanha na fila: ${r.total} envio(s)`); setTimeout(() => montarTela('campanhas'), 1500); } else msg(r.erro || 'Não foi possível enviar.', false); };
+    document.querySelectorAll('button[data-env]').forEach(b => b.onclick = async () => { const rows = await api(`/api/admin/campanhas/${b.dataset.env}/envios`); $('#envios').innerHTML = `<h4 style="margin:16px 0 8px">Envios da campanha #${b.dataset.env}</h4><div class="tabela compacta"><table><thead><tr><th>Cliente</th><th>Canal</th><th>Destino</th><th>Status</th><th>Erro</th><th>Quando</th></tr></thead><tbody>${rows.map(x => `<tr><td>${esc(x.nome_dono || '#' + x.conta_id)}</td><td>${x.canal === 'email' ? '✉️' : '✈️'}</td><td>${esc(x.destino)}</td><td><span class="tag ${x.status === 'ok' ? 'ok' : 'off'}">${x.status}</span></td><td>${esc(x.erro || '')}</td><td>${diaBr(x.enviado_em)}</td></tr>`).join('') || '<tr><td colspan="6">Sem envios.</td></tr>'}</tbody></table></div>`; });
+    previa(); render();
   } };
 };
