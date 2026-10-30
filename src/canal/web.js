@@ -107,6 +107,65 @@ export class WebCanal {
       if (u.senha_hash && !verifica(atual, u.senha_hash)) return res.status(400).json({ erro: 'senha atual incorreta' });
       db.prepare('UPDATE usuarios SET senha_hash=? WHERE id=?').run(hash(nova), u.id); res.json({ ok: true });
     });
+    // ---------- Esqueci minha senha: código de 6 dígitos (e-mail + Telegram, se vinculado), válido 30 min ----------
+    db.exec(`CREATE TABLE IF NOT EXISTS senha_reset (id INTEGER PRIMARY KEY, usuario_id INTEGER NOT NULL, email TEXT NOT NULL, codigo_hash TEXT NOT NULL, token_hash TEXT NOT NULL, expira_em TEXT NOT NULL, usado_em TEXT, tentativas INTEGER DEFAULT 0, ip TEXT, criado_em TEXT DEFAULT CURRENT_TIMESTAMP); CREATE INDEX IF NOT EXISTS ix_senha_reset_email ON senha_reset (email, criado_em)`);
+    const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+    // Acha o usuário dono pelo e-mail (login web) ou pelo e-mail da conta (contas antigas criadas pelo Telegram)
+    const usuarioPorEmail = (email) => db.prepare('SELECT * FROM usuarios WHERE email=?').get(email)
+      || db.prepare("SELECT u.* FROM usuarios u JOIN contas c ON c.id=u.conta_id WHERE lower(c.email)=? AND u.papel='dono' ORDER BY u.id LIMIT 1").get(email);
+    const RESPOSTA_NEUTRA = { ok: true, mensagem: 'Se esse e-mail tiver conta no Fiel, enviamos um código de 6 dígitos. Confira também o spam e o Telegram.' };
+
+    app.post('/api/senha/esqueci', async (req, res) => {
+      const email = limpar(req.body?.email).toLowerCase();
+      if (!emailOk(email)) return res.status(400).json({ erro: 'e-mail inválido' });
+      // Limite: 3 pedidos por e-mail a cada 15 min (resposta sempre neutra para não revelar se o e-mail existe)
+      const recentes = db.prepare("SELECT COUNT(*) n FROM senha_reset WHERE email=? AND criado_em >= datetime('now','-15 minutes')").get(email).n;
+      if (recentes >= 3) return res.json(RESPOSTA_NEUTRA);
+      const u = usuarioPorEmail(email);
+      if (!u) { db.prepare("INSERT INTO senha_reset (usuario_id, email, codigo_hash, token_hash, expira_em, usado_em, ip) VALUES (0,?,?,?,datetime('now'),datetime('now'),?)").run(email, '-', '-', String(req.ip || '')); return res.json(RESPOSTA_NEUTRA); }
+      const codigo = String(crypto.randomInt(0, 1000000)).padStart(6, '0'); const token = crypto.randomBytes(24).toString('hex');
+      db.prepare("UPDATE senha_reset SET usado_em=COALESCE(usado_em, datetime('now')) WHERE usuario_id=? AND usado_em IS NULL").run(u.id); // invalida pedidos anteriores
+      db.prepare("INSERT INTO senha_reset (usuario_id, email, codigo_hash, token_hash, expira_em, ip) VALUES (?,?,?,?,datetime('now','+30 minutes'),?)").run(u.id, email, sha(codigo), sha(token), String(req.ip || ''));
+      const base = (process.env.WEBAPP_URL || process.env.PUBLIC_URL || 'https://usefiel.com').replace(/\/$/, '');
+      const link = `${base}/app/?reset=${token}&email=${encodeURIComponent(email)}`;
+      const nome = (u.nome || '').split(' ')[0] || 'olá';
+      let enviado = false;
+      try {
+        const { enviarEmail, emailConfigurado, moldura } = await import('../integracoes/email.js');
+        if (emailConfigurado()) {
+          await enviarEmail({ para: email, assunto: `Seu código Fiel: ${codigo}`,
+            texto: `Oi, ${nome}.\n\nSeu código para criar uma nova senha no Fiel é: ${codigo}\nVálido por 30 minutos.\n\nOu abra: ${link}\n\nSe não foi você, ignore este e-mail — sua senha atual continua valendo.`,
+            html: moldura({ titulo: 'Criar nova senha', corpoHtml: `<p style="margin:0 0 16px">Oi, ${nome}. Use o código abaixo para criar uma nova senha no Fiel:</p><div style="font-family:ui-monospace,Menlo,monospace;font-size:32px;letter-spacing:8px;font-weight:700;text-align:center;background:#F3EBDA;border-radius:10px;padding:16px 0;margin:0 0 16px">${codigo}</div><p style="margin:0 0 20px;font-size:14px;color:#4A4D59">Válido por 30 minutos. Ou clique no botão:</p><p style="text-align:center;margin:0 0 20px"><a href="${link}" style="background:#E85D4A;color:#fff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:600;display:inline-block">Criar nova senha</a></p><p style="margin:0;font-size:13px;color:#7A7D87">Se não foi você que pediu, ignore este e-mail — sua senha atual continua valendo.</p>` }) });
+          enviado = true;
+        }
+      } catch (e) { console.error('[senha] e-mail falhou:', e.message); }
+      try { // Telegram, se a conta tiver vinculado
+        const tgId = db.prepare("SELECT chat_id FROM usuarios WHERE conta_id=? AND canal='telegram' ORDER BY id LIMIT 1").get(u.conta_id)?.chat_id;
+        const { canalAtual } = await import('./atual.js'); const c = canalAtual(); const tg = c?.tg || (c?.enviar && !c?.web ? c : null);
+        if (tgId && tg) { await tg.enviar(null, tgId, `🔑 *Fiel · nova senha*\nSeu código: *${codigo}* (válido 30 min).\nSe não foi você, ignore — sua senha atual continua valendo.`); enviado = true; }
+      } catch (e) { console.error('[senha] telegram falhou:', e.message); }
+      if (!enviado) console.warn(`[senha] pedido de reset para ${email} sem canal de entrega (configure SMTP_*)`);
+      res.json(RESPOSTA_NEUTRA);
+    });
+
+    app.post('/api/senha/redefinir', (req, res) => {
+      const email = limpar(req.body?.email).toLowerCase(); const codigo = limpar(req.body?.codigo).replace(/\D/g, ''); const token = limpar(req.body?.token); const nova = String(req.body?.nova || '');
+      if (nova.length < 8) return res.status(400).json({ erro: 'a nova senha precisa ter pelo menos 8 caracteres' });
+      if (!emailOk(email) || (!codigo && !token)) return res.status(400).json({ erro: 'informe o e-mail e o código recebido' });
+      const r = db.prepare("SELECT * FROM senha_reset WHERE email=? AND usado_em IS NULL AND expira_em > datetime('now') ORDER BY id DESC LIMIT 1").get(email);
+      if (!r) return res.status(400).json({ erro: 'código expirado ou inválido — peça um novo' });
+      if (r.tentativas >= 5) { db.prepare("UPDATE senha_reset SET usado_em=datetime('now') WHERE id=?").run(r.id); return res.status(400).json({ erro: 'muitas tentativas — peça um novo código' }); }
+      const ok = token ? sha(token) === r.token_hash : sha(codigo) === r.codigo_hash;
+      if (!ok) { db.prepare('UPDATE senha_reset SET tentativas=tentativas+1 WHERE id=?').run(r.id); return res.status(400).json({ erro: `código incorreto (${4 - r.tentativas} tentativa(s) restante(s))` }); }
+      const u = db.prepare('SELECT * FROM usuarios WHERE id=?').get(r.usuario_id); if (!u) return res.status(400).json({ erro: 'conta não encontrada' });
+      db.prepare('UPDATE usuarios SET senha_hash=?, email=COALESCE(NULLIF(email,\'\'), ?) WHERE id=?').run(hash(nova), email, u.id);
+      db.prepare("UPDATE senha_reset SET usado_em=datetime('now') WHERE id=?").run(r.id);
+      db.prepare('DELETE FROM web_sessoes WHERE conta_id=?').run(u.conta_id); // derruba sessões antigas (outros aparelhos)
+      const tok = crypto.randomBytes(24).toString('hex'); db.prepare('INSERT INTO web_sessoes (token, conta_id, chat_id) VALUES (?,?,?)').run(tok, u.conta_id, u.chat_id);
+      db.prepare('UPDATE usuarios SET ultimo_login=CURRENT_TIMESTAMP WHERE id=?').run(u.id);
+      setCookie(res, tok); res.json({ ok: true, token: tok });
+    });
+
     const auth = (req, res, next) => { const s = sessao(req); if (!s) return res.status(401).json({ erro: 'não autenticado' }); req.sessao = s; next(); };
     app.get('/api/me', auth, async (req, res) => {
       const conta = db.prepare('SELECT id, nome_dono, empresa, foco_mes, empresas, admin, plano, email, cpf_cnpj FROM contas WHERE id=?').get(req.sessao.conta_id);

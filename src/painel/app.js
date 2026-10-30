@@ -11,7 +11,7 @@ async function mostrarLogin() {
   // abas
   document.querySelectorAll('.abas-login .aba').forEach(b => b.onclick = () => {
     document.querySelectorAll('.abas-login .aba').forEach(x => x.classList.toggle('on', x === b));
-    for (const id of ['formEntrar', 'formCadastro', 'formTelegram']) document.getElementById(id).classList.toggle('oculto', id !== 'form' + (b.dataset.aba[0].toUpperCase() + b.dataset.aba.slice(1)));
+    for (const id of ['formEntrar', 'formCadastro', 'formTelegram', 'formEsqueci', 'formRedefinir']) document.getElementById(id)?.classList.toggle('oculto', id !== 'form' + (b.dataset.aba[0].toUpperCase() + b.dataset.aba.slice(1)));
     if (b.dataset.aba === 'telegram') carregarTelegram();
   });
   // formulários
@@ -21,6 +21,24 @@ async function mostrarLogin() {
   $('#formCadastro').onsubmit = async (e) => { e.preventDefault(); $('#erroCadastro').textContent = ''; const f = Object.fromEntries(new FormData(e.target));
     const r = await (await fetch('/api/cadastro', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(f) })).json();
     if (r.ok) { localStorage.setItem('akm', r.token); iniciar(); } else $('#erroCadastro').textContent = r.erro || 'não foi possível criar'; };
+  // ---------- esqueci minha senha ----------
+  const FORMS = ['formEntrar', 'formCadastro', 'formTelegram', 'formEsqueci', 'formRedefinir'];
+  const mostrarForm = (id) => FORMS.forEach(x => document.getElementById(x)?.classList.toggle('oculto', x !== id));
+  const postJ = async (url, corpo) => (await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(corpo) })).json().catch(() => ({ erro: 'falha de conexão' }));
+  $('#linkEsqueci').onclick = (e) => { e.preventDefault(); $('#formEsqueci').email.value = $('#formEntrar').email.value || ''; mostrarForm('formEsqueci'); $('#formEsqueci').email.focus(); };
+  document.querySelectorAll('.voltarEntrar').forEach(a => a.onclick = (e) => { e.preventDefault(); mostrarForm('formEntrar'); });
+  const pedirCodigo = async (email) => { const r = await postJ('/api/senha/esqueci', { email }); if (r.erro) throw new Error(r.erro); return r; };
+  $('#formEsqueci').onsubmit = async (e) => { e.preventDefault(); const email = e.target.email.value.trim(); $('#erroEsqueci').textContent = ''; const b = e.target.querySelector('button'); b.disabled = true;
+    try { const r = await pedirCodigo(email); const fr = $('#formRedefinir'); fr.email.value = email; fr.token.value = ''; $('#campoCodigo').classList.remove('oculto'); fr.codigo.required = true; $('#msgRedefinir').textContent = r.mensagem; mostrarForm('formRedefinir'); fr.codigo.focus(); }
+    catch (err) { $('#erroEsqueci').textContent = err.message; } finally { b.disabled = false; } };
+  $('#reenviarCodigo').onclick = async (e) => { e.preventDefault(); const email = $('#formRedefinir').email.value.trim(); if (!email) return; try { const r = await pedirCodigo(email); $('#msgRedefinir').textContent = '✅ ' + r.mensagem; } catch (err) { $('#erroRedefinir').textContent = err.message; } };
+  $('#formRedefinir').onsubmit = async (e) => { e.preventDefault(); $('#erroRedefinir').textContent = ''; const f = Object.fromEntries(new FormData(e.target));
+    if (f.nova !== f.nova2) return $('#erroRedefinir').textContent = 'as duas senhas não conferem';
+    const r = await postJ('/api/senha/redefinir', { email: f.email, codigo: f.codigo, token: f.token, nova: f.nova });
+    if (r.ok) { localStorage.setItem('akm', r.token); history.replaceState(null, '', location.pathname); iniciar(); } else $('#erroRedefinir').textContent = r.erro || 'não foi possível salvar'; };
+  // Link do e-mail: /app/?reset=TOKEN&email=... abre direto a tela de nova senha (sem precisar digitar o código)
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('reset')) { const fr = $('#formRedefinir'); fr.email.value = qs.get('email') || ''; fr.token.value = qs.get('reset'); fr.codigo.required = false; $('#campoCodigo').classList.add('oculto'); $('#msgRedefinir').textContent = 'Defina sua nova senha.'; mostrarForm('formRedefinir'); fr.nova.focus(); }
 }
 async function carregarTelegram() {
   if ($('#codigo').textContent.length > 6) return; // já carregado

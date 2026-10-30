@@ -315,3 +315,7 @@ details.menu-mais[open] summary .seta{transform:rotate(90deg);color:var(--coral)
 .suporte-sb{margin:12px 12px 0;font-size:11px;color:var(--tinta-dim);text-align:center;line-height:1.5}
 .suporte-sb a{color:var(--tinta-mid);text-decoration:none;font-weight:600}
 .suporte-sb a:hover{color:var(--coral)}
+
+.form-login .link-esqueci{margin:12px 0 0;font-size:13px;text-align:center}
+.form-login .link-esqueci a{color:var(--tinta-mid);text-decoration:underline;text-underline-offset:2px}
+.form-login .link-esqueci a:hover{color:var(--coral)}
