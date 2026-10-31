@@ -15,6 +15,12 @@ export async function tratarMensagem(msg, canal) {
   if (!conta) return (await tentarEntrar(msg)) || onboarding(msg);
   contextoUso.contaId = conta.id; contextoUso.modulo = null;
   { const t = (msg.texto || '').trim().toLowerCase();
+    const mt = t.match(/^(retomar|cancelar|status|andamento)( da)? tarefas?(?: #?(\d+))?$/);
+    if (mt) { const tl = await import('./tarefas-longas.js'); try {
+      if (mt[1] === 'retomar' && mt[3]) { tl.retomarTarefa(conta.id, mt[3]); return `▶️ Retomei a tarefa #${mt[3]}. Aviso quando terminar.`; }
+      if (mt[1] === 'cancelar' && mt[3]) { tl.cancelarTarefa(conta.id, mt[3]); return `⏹️ Tarefa #${mt[3]} cancelada. O que já foi gravado continua na planilha.`; }
+      const ls = tl.listarTarefas(conta.id); return ls.length ? '*Tarefas em segundo plano*\n' + ls.slice(0, 5).map(x => `- #${x.id} ${x.status} · ${x.andamento} · ${x.objetivo.slice(0, 70)}`).join('\n') : 'Nenhuma tarefa em segundo plano.';
+    } catch (e) { return `Não consegui: ${e.message}`; } }
     if (/^(parar|cancelar|sair das?) ofertas?$/.test(t)) { db.prepare('UPDATE contas SET marketing_optin=0, marketing_optin_em=CURRENT_TIMESTAMP WHERE id=?').run(conta.id); return 'Pronto — você não vai mais receber ofertas e lançamentos. Comunicados importantes do serviço continuam chegando. Para voltar, mande *receber ofertas*.'; }
     if (/^(receber|quero) ofertas?$/.test(t)) { db.prepare('UPDATE contas SET marketing_optin=1, marketing_optin_em=CURRENT_TIMESTAMP WHERE id=?').run(conta.id); return '✅ Combinado — você vai receber novidades, ofertas e lançamentos do Fiel. Para parar, mande *parar ofertas*.'; } }
   const usuario = obterUsuario(msg.chatId);

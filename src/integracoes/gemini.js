@@ -19,7 +19,12 @@ const CADEIA = [...new Set([
   'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.1-flash-lite',
 ].map(m => (m || '').trim()).filter(Boolean))];
 const RAPIDO = process.env.MODELO_RAPIDO || 'gemini-3.1-flash-lite';
-export const contextoUso = { contaId: null, modulo: null };
+// Contexto de uso (de quem é a chamada de IA, para debitar créditos). Dentro de rodarComContexto() cada execução
+// tem o seu (tarefas em segundo plano não se misturam com conversas); fora dele, vale o objeto global como antes.
+import { AsyncLocalStorage } from 'node:async_hooks';
+const _als = new AsyncLocalStorage(); const _global = { contaId: null, modulo: null };
+export const contextoUso = new Proxy(_global, { get: (t, k) => (_als.getStore() ?? t)[k], set: (t, k, v) => { (_als.getStore() ?? t)[k] = v; return true; } });
+export const rodarComContexto = (ctx, fn) => _als.run({ contaId: null, modulo: null, ...ctx }, fn);
 let _creditos = null; import('../creditos/index.js').then(m => { _creditos = m; }).catch(() => {});
 let _registrar = null; import('../canal/api-marca.js').then(m => { _registrar = m.registrarUso; }).catch(() => {});
 export const modelo = (opts = {}, { rapido = false } = {}) => {

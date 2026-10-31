@@ -83,3 +83,30 @@ export async function atualizarCelulas(contaId, { planilha, aba, intervalo, valo
   return { atualizado: r.data.updatedRange, celulas: r.data.updatedCells, link: link(p.spreadsheet_id) };
 }
 export async function abas(contaId, planilha) { const p = resolver(contaId, planilha); return { ...(await info(contaId, p.spreadsheet_id)), link: link(p.spreadsheet_id) }; }
+
+/** Cria uma aba nova numa planilha cadastrada, com cabeçalho formatado (mesmo padrão de criar()). Se já existir, só informa. */
+export async function criarAba(contaId, { planilha, aba, cabecalhos = [] }) {
+  const p = resolver(contaId, planilha); const svc = auth(contaId); const nome = String(aba || '').trim().slice(0, 90);
+  if (!nome) throw new Error('Informe o nome da aba.');
+  const atual = await info(contaId, p.spreadsheet_id);
+  if (atual.abas.some(a => a.toLowerCase() === nome.toLowerCase())) return { ok: true, ja_existia: true, aba: nome, abas: atual.abas, link: link(p.spreadsheet_id) };
+  const r = await svc.spreadsheets.batchUpdate({ spreadsheetId: p.spreadsheet_id, requestBody: { requests: [{ addSheet: { properties: { title: nome, gridProperties: { frozenRowCount: cabecalhos.length ? 1 : 0 } } } }] } }).catch(e => { throw traduzErro(e); });
+  const sheetId = r.data.replies?.[0]?.addSheet?.properties?.sheetId;
+  if (cabecalhos.length) {
+    await svc.spreadsheets.values.update({ spreadsheetId: p.spreadsheet_id, range: `'${nome}'!A1`, valueInputOption: 'USER_ENTERED', requestBody: { values: [cabecalhos.map(String)] } }).catch(e => { throw traduzErro(e); });
+    try { await svc.spreadsheets.batchUpdate({ spreadsheetId: p.spreadsheet_id, requestBody: { requests: [{ repeatCell: { range: { sheetId, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { backgroundColor: { red: 0.216, green: 0.255, blue: 0.306 }, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } } } }, fields: 'userEnteredFormat(textFormat,backgroundColor)' } }] } }); } catch {}
+  }
+  return { ok: true, aba: nome, cabecalhos, abas: [...atual.abas, nome], link: link(p.spreadsheet_id) };
+}
+
+/** Renomeia uma aba existente. */
+export async function renomearAba(contaId, { planilha, aba, novo_nome }) {
+  const p = resolver(contaId, planilha); const svc = auth(contaId);
+  const meta = await svc.spreadsheets.get({ spreadsheetId: p.spreadsheet_id, fields: 'sheets.properties' }).catch(e => { throw traduzErro(e); });
+  const s = meta.data.sheets.find(x => x.properties.title.toLowerCase() === String(aba || '').trim().toLowerCase());
+  if (!s) throw new Error(`Aba "${aba}" não existe. Abas: ${meta.data.sheets.map(x => x.properties.title).join(', ')}`);
+  const novo = String(novo_nome || '').trim().slice(0, 90); if (!novo) throw new Error('Informe o novo nome.');
+  await svc.spreadsheets.batchUpdate({ spreadsheetId: p.spreadsheet_id, requestBody: { requests: [{ updateSheetProperties: { properties: { sheetId: s.properties.sheetId, title: novo }, fields: 'title' } }] } }).catch(e => { throw traduzErro(e); });
+  if (p.aba_padrao === s.properties.title) db.prepare('UPDATE planilhas SET aba_padrao=? WHERE id=?').run(novo, p.id);
+  return { ok: true, de: s.properties.title, para: novo, link: link(p.spreadsheet_id) };
+}

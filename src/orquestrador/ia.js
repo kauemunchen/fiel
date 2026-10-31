@@ -52,7 +52,9 @@ function montarTools(decls, modulo, conta) {
   return tools.length ? tools : undefined;
 }
 
-export async function responder({ prompt, conta, modulo, msg, ativos = [], profundidade = 0 }) {
+// autoConfirmar: usado por tarefas em segundo plano já aprovadas pelo dono — só libera ações de planilha; o resto que exige confirmação vira erro.
+const AUTO_OK = new Set(['atualizar_planilha']);
+export async function responder({ prompt, conta, modulo, msg, ativos = [], profundidade = 0, autoConfirmar = false, rodadas = 6 }) {
   const decls = ferramentasDe(modulo, conta, profundidade === 0 ? ativos : []);
   // Pesquisa web disponível para esta conta? (controla tanto a tool quanto o bloco no prompt).
   const temBuscaWeb = (process.env.GEMINI_WEB_SEARCH ?? '1') !== '0' && (conta?.pesquisa_web === 1 || conta?.admin === 1 || conta?.plano === 'ilimitado');
@@ -90,7 +92,7 @@ FORMATO (canal de mensagem, não é documento): sem títulos com #, sem tabelas,
   }
   contents.push({ role: 'user', parts: [{ text: msg.texto }] });
   let ultimoErro = null, assinaturaAnterior = ''; const consultados = new Set(); let ultimoResultado = null;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < rodadas; i++) {
     let r;
     try { r = await m.generateContent({ contents }); }
     catch (e) {
@@ -116,7 +118,8 @@ FORMATO (canal de mensagem, não é documento): sem títulos com #, sem tabelas,
     assinaturaAnterior = assinatura;
     const respostas = [];
     // Alguma ação do lote exige confirmação? Guarda o LOTE inteiro (todas as chamadas desta rodada) e pergunta uma vez só.
-    if (calls.some(c => precisaConfirmar(modulo, c.name))) {
+    if (autoConfirmar) { const bloqueada = calls.find(c => precisaConfirmar(modulo, c.name) && !AUTO_OK.has(c.name)); if (bloqueada) return `ERRO: o lote pediu "${descreverAcao(bloqueada)}", que precisa da sua confirmação e não roda em segundo plano.`; }
+    else if (calls.some(c => precisaConfirmar(modulo, c.name))) {
       db.prepare('INSERT INTO pendencias (conta_id, chat_id, modulo, ferramenta, args) VALUES (?,?,?,?,?)').run(conta.id, msg.chatId, modulo, '__lote__', JSON.stringify(calls.map(c => ({ name: c.name, args: c.args }))));
       const email = calls.find(c => c.name === 'enviar_email');
       if (email && calls.length === 1) {
@@ -157,6 +160,7 @@ export const BOTOES_SIM_NAO = [[{ t: '✅ Sim', d: 'sim' }, { t: '❌ Não', d: 
 export function descreverAcao(c) {
   const a = c.args || {};
   switch (c.name) {
+    case 'iniciar_tarefa_longa': return `rodar em segundo plano: ${a.objetivo} — até ${a.total_lotes} lote(s) de ~20 itens, sem você precisar mandar "continua"; aviso quando terminar (consome créditos a cada lote)`;
     case 'cancelar_evento': return `cancelar o evento ${a.titulo ? `"${a.titulo}"` : a.event_id?.slice(0, 12) + '…'}`;
     case 'criar_evento': return `criar "${a.titulo}" em ${a.inicio?.replace('T', ' ')}${a.categoria ? ` [${a.categoria}]` : ''}`;
     case 'mover_evento': return `mover evento ${a.titulo ? `"${a.titulo}"` : ''} para ${a.inicio?.replace('T', ' ') || '(mesma data)'}`;

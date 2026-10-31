@@ -115,6 +115,8 @@ function destravarPublicando() {
 }
 
 export function iniciarRotinas(canal) {
+  // Tarefas longas em segundo plano: verifica a fila a cada 20s (um lote por vez)
+  setInterval(() => import('../orquestrador/tarefas-longas.js').then(m => m.tick()).catch(e => console.error('[tarefas]', e.message)), 20000);
   destravarPublicando(); // posts travados em 'publicando' do deploy anterior → 'erro' (admin reavalia)
   cron.schedule('* * * * *', async () => {
     await dispararLembretes(canal);
