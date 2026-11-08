@@ -13,6 +13,4 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            echo "== containers"; docker ps --format '{{.Names}} | {{.Image}} | {{.Ports}}'
-            for c in $(docker ps --format '{{.Names}}'); do img=$(docker inspect -f '{{.Config.Image}}' $c); case "$img" in *nginx*) echo "== $c mounts"; docker inspect -f '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' $c; docker inspect -f '{{range $k,$v := .Config.Labels}}{{$k}}={{$v}}{{"\n"}}{{end}}' $c | grep -i "rule\|priority" ;; esac; done
-            echo "== arquivos com o titulo"; grep -rl "A equipe que você não precisou contratar" /docker --include=*.html 2>/dev/null | grep -v node_modules | grep -v "/assessor/src/" | head
+            f=/docker/kmapp-landing/html/index.html; wc -c $f; grep -n "<footer" $f; awk '/<footer/,/<\/footer>/' $f | head -40
