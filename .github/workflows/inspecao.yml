@@ -13,4 +13,9 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            f=/docker/kmapp-landing/html/index.html; wc -c $f; grep -n "<footer" $f; awk '/<footer/,/<\/footer>/' $f | head -40
+            f=/docker/kmapp-landing/html/index.html
+            if grep -q 'href="/privacidade"' $f; then echo "ja tem links"; else
+              cp $f $f.bak-$(date +%Y%m%d%H%M)
+              sed -i 's#</footer>#<div style="max-width:1180px;margin:18px auto 0;text-align:center;font-family:Inter,Arial,sans-serif;font-size:13px"><a href="/privacidade" style="color:\#C8CFD7;text-decoration:none">Política de Privacidade</a> <span style="color:\#6E6A8A">·</span> <a href="/termos" style="color:\#C8CFD7;text-decoration:none">Termos de Uso</a></div></footer>#' $f
+              echo "links adicionados"; fi
+            grep -o 'href="/privacidade"[^<]*<' $f | head -2; grep -o 'href="/termos"[^<]*<' $f | head -2; ls -la /docker/kmapp-landing/html/ | grep bak
