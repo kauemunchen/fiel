@@ -73,15 +73,35 @@
         } ev.target.value = ''; }; },
       salvar: () => chamar('/api/onboarding/passo', { method: 'POST', body: { passo: 'mia', dados: { perfil: $o('#oPerfil').value, nicho: valorChip('nicho'), categoria: valorChip('nicho'), tom: valorChip('tomMarca'), cor_fundo: $o('#oFundo').dataset.mudou ? $o('#oFundo').value : '', cor_destaque: $o('#oDestaque').dataset.mudou ? $o('#oDestaque').value : '' } } }) }; },
 
-    instagram: () => ({ titulo: 'Publicar no Instagram', sub: 'Opcional agora. Sem isso, a MIA cria e agenda; publicar fica para quando conectar.', html: E.instagram ? '<div class="onb-ok">✅ Instagram conectado</div>' : `
-      ${E.instagram_url ? `<button type="button" class="btn ouro onb-grande" id="oIg">Conectar Instagram</button>
-      <p class="onb-dica">Entre com o Instagram da empresa (perfil <b>Profissional</b>) e toque em <b>Permitir</b>. Enquanto a Meta libera o Fiel, o seu @ precisa ter sido incluído pelo suporte e o convite aceito no Instagram: <b>Configurações → Apps e sites → Convites de testador</b>.</p>
-      <div class="onb-espera oculto" id="oIgEspera">Aguardando a autorização…</div>
-      <details class="onb-dica"><summary>Tenho um token de acesso</summary><input id="oIgTok" placeholder="IGAA…" autocomplete="off" style="margin-top:6px"></details>` : `
-      <label>Token de acesso do Instagram (IGAA…)<input id="oIgTok" placeholder="Cole aqui o token" autocomplete="off"></label>
-      <p class="onb-dica">Não tem o token? Toque em <b>Depois</b> — dá para conectar em Conexões.</p>`}<div class="onb-dica" id="oIgSt"></div>`,
-      montar: () => { const b = $o('#oIg'); if (!b) return; b.onclick = () => { const w = window.open(E.instagram_url, 'fielInstagram', 'width=520,height=720'); if (!w) location.href = E.instagram_url; $o('#oIgEspera').classList.remove('oculto'); vigiar(() => E.instagram, '#oIgEspera', '✅ Instagram conectado'); }; },
-      salvar: async () => { const t = $o('#oIgTok')?.value.trim(); if (!t) return; const r = await chamar('/api/conexoes/instagram', { method: 'POST', body: { token: t } }); if (r.erro) { $o('#oIgSt').textContent = '⚠️ ' + r.erro; throw new Error(r.erro); } } }),
+    instagram: () => {
+      const L = E.instagram_liberacao; const arrobaPad = (L?.arroba || E.mia.identidade?.perfil || E.mia.assinatura || '').trim();
+      const conectar = E.instagram_url ? `<button type="button" class="btn ${L?.status === 'liberado' ? 'ouro onb-grande' : 'onb-sec'}" id="oIg">Conectar Instagram</button><div class="onb-espera oculto" id="oIgEspera">Aguardando a autorização…</div>` : '';
+      let html;
+      if (E.instagram) html = '<div class="onb-ok">✅ Instagram conectado</div>';
+      else if (L?.status === 'liberado') html = `<div class="onb-ok">✅ ${escO(L.arroba)} liberado</div>
+        <p class="onb-dica">1) Logado no ${escO(L.arroba)}, aceite o convite: <a href="https://www.instagram.com/accounts/manage_access/" target="_blank" rel="noopener"><b>Apps e sites → Convites de testador → Aceitar</b></a><br>2) Toque em Conectar e depois em <b>Permitir</b>.</p>${conectar}`;
+      else html = `
+        <label>@ do Instagram que a MIA vai usar (perfil Profissional)<input id="oIgArroba" value="${escO(arrobaPad)}" placeholder="@suaempresa" autocomplete="off"></label>
+        <button type="button" class="btn ouro onb-grande" id="oIgPedir">${L?.status === 'pendente' ? 'Atualizar o @ enviado' : 'Enviar para liberação'}</button>
+        <p class="onb-dica" id="oIgSt">${L?.status === 'pendente' ? `✅ Pedido enviado para ${escO(L.arroba)}. O suporte do Fiel libera em até <b>12 horas</b> e você recebe um aviso aqui e no Telegram para aceitar o convite e conectar. Pode seguir.` : 'O suporte do Fiel libera o seu @ em até <b>12 horas</b> (exigência da Meta nesta fase). Você recebe um aviso para aceitar o convite e conectar com 1 toque.'}</p>
+        ${E.instagram_url ? `<details class="onb-dica"><summary>Já fui liberado</summary><div style="margin-top:8px">${conectar}</div></details>` : ''}`;
+      return { titulo: 'Publicar no Instagram', sub: 'A MIA cria e agenda desde já; publicar entra quando o seu @ for liberado.', html: html + `<details class="onb-dica"><summary>Tenho um token de acesso</summary><input id="oIgTok" placeholder="IGAA…" autocomplete="off" style="margin-top:6px"></details>`,
+        montar: () => {
+          const pedir = async () => { const v = $o('#oIgArroba')?.value.trim(); if (!v) { $o('#oIgSt').textContent = 'Digite o @ do Instagram.'; return null; }
+            const r = await chamar('/api/instagram/liberacao', { method: 'POST', body: { arroba: v } }); if (r.erro) { $o('#oIgSt').textContent = '⚠️ ' + r.erro; throw new Error(r.erro); }
+            E.instagram_liberacao = { ...(E.instagram_liberacao || {}), ...r }; $o('#oIgSt').innerHTML = `✅ Pedido enviado para <b>${escO(r.arroba)}</b>. Em até <b>12 horas</b> o suporte libera e você recebe um aviso aqui e no Telegram para aceitar o convite e conectar. Pode seguir.`; $o('#oIgPedir').textContent = 'Atualizar o @ enviado'; return r; };
+          $o('#oIgPedir') && ($o('#oIgPedir').onclick = () => pedir().catch(() => {}));
+          TELAS._pedirIg = pedir;
+          const b = $o('#oIg'); if (b) b.onclick = () => { const w = window.open(E.instagram_url, 'fielInstagram', 'width=520,height=720'); if (!w) location.href = E.instagram_url; $o('#oIgEspera').classList.remove('oculto'); vigiar(() => E.instagram, '#oIgEspera', '✅ Instagram conectado'); };
+        },
+        salvar: async () => {
+          const t = $o('#oIgTok')?.value.trim();
+          if (t) { const r = await chamar('/api/conexoes/instagram', { method: 'POST', body: { token: t } }); if (r.erro) throw new Error(r.erro); return; }
+          // Continuar com o @ digitado e ainda não enviado → envia o pedido junto
+          const v = $o('#oIgArroba')?.value.trim(); const L2 = E.instagram_liberacao;
+          if (v && !(L2 && L2.arroba && L2.arroba.replace('@', '') === v.replace('@', '').toLowerCase())) await TELAS._pedirIg?.();
+        } };
+    },
 
     teste: () => ({ titulo: 'Teste rápido', sub: 'Conferindo o que ficou pronto.', html: '<ul class="onb-teste" id="oTeste"><li>Testando…</li></ul>',
       montar: async () => { const r = await chamar('/api/onboarding/teste', { method: 'POST' }).catch(() => ({ itens: [] }));

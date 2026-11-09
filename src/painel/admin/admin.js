@@ -46,6 +46,15 @@ telas.resumo = async () => {
   return { titulo: '📊 Resumo', sub: `Fiel · últimos 30 dias`, corpo, depois() { document.querySelectorAll('button[data-conta]').forEach(b => b.onclick = () => abrirConta(Number(b.dataset.conta))); } };
 };
 
+telas.instagram = async () => {
+  const d = await api('/api/admin/instagram');
+  const st = { pendente: 'tag warn', liberado: 'tag', conectado: 'tag ok' };
+  const linhas = d.itens.map(x => `<tr><td><b>${esc(x.arroba)}</b></td><td>${esc(x.empresa || '—')}<br><small>${esc(x.nome_dono || '')} · #${x.conta_id}</small></td><td><span class="${st[x.status] || 'tag'}">${x.status}</span>${x.status === 'pendente' ? `<br><small style="color:${x.horas > 10 ? 'var(--coral)' : 'inherit'}">há ${Math.floor(x.horas)} h${x.horas > 10 ? ' — prazo estourando' : ''}</small>` : ''}</td><td>${diaBr(x.criado_em)}</td><td>${x.status === 'pendente' ? `<button class="btn prim" data-lib="${x.id}">Liberei</button>` : ''}</td></tr>`).join('');
+  return { titulo: '📸 Liberar Instagram', sub: `Inclua o @ em Funções do app → Testador do Instagram e toque em "Liberei" — o cliente recebe o passo a passo. Prazo: ${d.prazo_horas} h.`,
+    corpo: `<p><a class="btn prim" href="${d.link_funcoes}" target="_blank" rel="noopener">Abrir Funções do app (Meta)</a></p><div class="tabela"><table><thead><tr><th>@</th><th>Cliente</th><th>Status</th><th>Pedido</th><th></th></tr></thead><tbody>${linhas || '<tr><td colspan="5">Nenhum pedido ainda.</td></tr>'}</tbody></table></div>`,
+    depois() { document.querySelectorAll('button[data-lib]').forEach(b => b.onclick = async () => { b.disabled = true; const r = await post(`/api/admin/instagram/${b.dataset.lib}/liberado`); if (r.erro) { toast('⚠️ ' + r.erro); b.disabled = false; return; } toast(`${r.arroba} liberado — cliente avisado`); montarTela('instagram'); }); } };
+};
+
 telas.contas = async () => {
   return { titulo: '🏢 Contas', sub: 'Todas as contas do Fiel. Clique para ver detalhes, ajustar créditos ou bloquear.', corpo: `
     <div class="linha-busca">

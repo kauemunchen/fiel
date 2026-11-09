@@ -75,6 +75,8 @@ telas.conexoes = async () => {
     <div class="cartao"><h3>Instagram ${ig.conectado ? (ig.ok ? `<span class="tag ok">@${esc(ig.username)}</span>` : '<span class="tag off">token inválido</span>') : '<span class="tag off">não conectado</span>'}</h3>
       <p class="d">${ig.conectado ? (ig.ok ? `Conta ${esc(ig.tipo || '')} · token ${diasIg != null ? (diasIg > 0 ? `vence em ${diasIg} dias (${ig.expira_em.split('-').reverse().join('/')})` : 'vencido') : ''}` : esc(ig.erro || '')) : 'Publicação de posts, Reels e Stories pela MIA.'}</p>
       ${diasIg != null && diasIg <= 7 ? '<p class="d"><span class="tag warn">renove o token</span></p>' : ''}
+      ${!ig.conectado && ig.liberacao?.status !== 'liberado' ? `<form id="fIgLib" class="campo"><label>@ do Instagram para liberação (o suporte do Fiel libera em até 12 h)</label><input name="arroba" value="${esc(ig.liberacao?.arroba || '')}" placeholder="@suaempresa"><div style="margin-top:6px"><button class="btn prim">${ig.liberacao?.status === 'pendente' ? 'Atualizar @' : 'Enviar para liberação'}</button></div>${ig.liberacao?.status === 'pendente' ? `<p class="d">✅ Pedido enviado para ${esc(ig.liberacao.arroba)} — você recebe um aviso quando for liberado.</p>` : ''}</form>` : ''}
+      ${ig.liberacao?.status === 'liberado' && !ig.conectado ? `<p class="d">✅ ${esc(ig.liberacao.arroba)} liberado. Aceite o convite em <a href="https://www.instagram.com/accounts/manage_access/" target="_blank" rel="noopener">Apps e sites → Convites de testador</a> e toque em Conectar.</p>` : ''}
       ${ig.url_autorizar ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn prim" type="button" id="conIg">${ig.conectado ? 'Reconectar Instagram' : 'Conectar Instagram'}</button></div><p class="d" style="margin-top:6px">Perfil Profissional. Enquanto a Meta libera o Fiel, o seu @ precisa estar cadastrado como testador e o convite aceito no Instagram (Configurações → Apps e sites → Convites de testador).</p>` : ''}
       <details${ig.url_autorizar ? '' : ' open'}><summary class="d" style="cursor:pointer;margin-top:8px">Conectar com token (avançado)</summary>
       <form id="fIg" class="campo"><label>Token de acesso do Instagram (IGAA…)</label><input name="token" placeholder="IGAA…" autocomplete="off"><div style="display:flex;gap:8px;margin-top:6px"><button class="btn prim">Salvar token</button>${ig.conectado ? '<button class="btn perigo" type="button" id="descIg">desconectar</button>' : ''}</div></form></details></div>
@@ -93,6 +95,7 @@ telas.conexoes = async () => {
   return { titulo: '🔌 Conexões', sub: 'Serviços ligados à sua conta. O status é verificado ao vivo.', corpo, depois() {
     $('#fIg').onsubmit = async (e) => { e.preventDefault(); const r = await post('/api/conexoes/instagram', { token: e.target.token.value }); toast('Instagram conectado: @' + r.username); mostrarTela('conexoes'); };
     $('#descIg') && ($('#descIg').onclick = async () => { if (confirm('Desconectar o Instagram? Posts agendados vão falhar até reconectar.')) { await del('/api/conexoes/instagram'); mostrarTela('conexoes'); } });
+    $('#fIgLib') && ($('#fIgLib').onsubmit = async (e) => { e.preventDefault(); const r = await post('/api/instagram/liberacao', { arroba: e.target.arroba.value }); toast(`Pedido enviado: ${r.arroba} — liberação em até 12 h`); mostrarTela('conexoes'); });
     $('#conIg') && ($('#conIg').onclick = () => { const w = window.open(ig.url_autorizar, 'fielInstagram', 'width=520,height=720'); if (!w) location.href = ig.url_autorizar; const f = (ev) => { if (String(ev.data).startsWith('fiel:instagram-')) { window.removeEventListener('message', f); if (ev.data === 'fiel:instagram-ok') { toast('Instagram conectado'); mostrarTela('conexoes'); } } }; window.addEventListener('message', f); });
     $('#conTelegram') && ($('#conTelegram').onclick = (e) => window.conectarTelegram(e.target));
     $('#descGoogle') && ($('#descGoogle').onclick = async () => { if (confirm('Desconectar o Google? Agenda, Gmail, Drive e Tasks param de funcionar até reconectar.')) { await del('/api/conexoes/google'); mostrarTela('conexoes'); } });
@@ -383,3 +386,6 @@ telas.conta = async () => {
     $('#btSair2').onclick = async () => { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin', headers: { authorization: 'Bearer ' + tokenLocal() } }); localStorage.removeItem('akm'); location.reload(); };
   } };
 };
+
+// link direto para uma tela (ex.: /app#conexoes vindo do aviso de Instagram liberado)
+window.addEventListener('load', () => { const h = location.hash.slice(1); if (h && telas[h]) setTimeout(() => { try { mostrarTela(h); } catch {} }, 800); });

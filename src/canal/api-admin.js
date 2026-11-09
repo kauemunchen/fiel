@@ -27,6 +27,10 @@ export function rotasAdmin(app) {
 
   import('./api-clientes.js').then(m => m.rotasClientes(app, auth, logAdmin)).catch(e => console.error('[admin] clientes', e.message));
 
+  // Liberação de @ do Instagram (testadores do app da Meta)
+  app.get('/api/admin/instagram', auth, async (req, res) => { const l = await import('../integracoes/instagram-liberacao.js'); res.json({ itens: l.listar(), link_funcoes: l.linkFuncoes(), prazo_horas: l.PRAZO_HORAS }); });
+  app.post('/api/admin/instagram/:id/liberado', auth, async (req, res) => { try { const l = await import('../integracoes/instagram-liberacao.js'); const r = await l.marcarLiberado(Number(req.params.id)); logAdmin(req.contaId, 'ig_liberado', r.conta_id, { arroba: r.arroba }); res.json(r); } catch (e) { res.status(400).json({ erro: e.message }); } });
+
   // Painel inicial — números e séries dos últimos 30 dias
   app.get('/api/admin/resumo', auth, (req, res) => {
     const q = (sql, ...a) => db.prepare(sql).get(...a); const l = (sql, ...a) => db.prepare(sql).all(...a);

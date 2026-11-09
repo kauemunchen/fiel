@@ -28,6 +28,7 @@ export async function estado(contaId) {
     google: { conectado: !!db.prepare('SELECT 1 FROM google_auth WHERE conta_id=?').get(contaId), url: urlGoogle },
     instagram: !!db.prepare('SELECT 1 FROM instagram_auth WHERE conta_id=?').get(contaId),
     instagram_url: (await import('../integracoes/instagram-oauth.js')).urlAutorizacao(contaId),
+    instagram_liberacao: (await import('../integracoes/instagram-liberacao.js')).statusDaConta(contaId),
     mia: { identidade: identidade(contaId) || {}, cores: k.cores || {}, assinatura: k.assinatura || '', logos: Object.keys(k.logos || {}).filter(v => k.logos[v]), fontes: k.fontes || '' },
   };
 }
@@ -56,7 +57,7 @@ export async function testar(contaId) {
     if (e.instagram) {
       try { const tok = db.prepare('SELECT token FROM instagram_auth WHERE conta_id=?').get(contaId).token; const me = await fetch(`https://graph.instagram.com/me?fields=username&access_token=${tok}`).then(x => x.json()); r.push(me.error ? { id: 'instagram', ok: false, texto: `Instagram: token recusado pela Meta (${me.error.message})` } : { id: 'instagram', ok: true, texto: `Instagram: @${me.username} pronto para publicar` }); }
       catch (x) { r.push({ id: 'instagram', ok: false, texto: `Instagram: falhou (${x.message})` }); }
-    } else r.push({ id: 'instagram', ok: null, texto: 'Instagram: não conectado — a MIA cria e agenda; publicar fica para quando conectar' });
+    } else { const L = e.instagram_liberacao; r.push({ id: 'instagram', ok: null, texto: L?.status === 'pendente' ? `Instagram: liberação de ${L.arroba} pedida — em até 12 h você recebe o aviso para aceitar e conectar` : L?.status === 'liberado' ? `Instagram: ${L.arroba} liberado — aceite o convite e toque em Conectar` : 'Instagram: não conectado — a MIA cria e agenda; publicar fica para quando conectar' }); }
   }
   return r;
 }
@@ -68,7 +69,7 @@ export function boasVindas(e) {
   const pronto = [], pendente = [];
   (e.telegram ? pronto : pendente).push('Telegram');
   if (e.modulos.secretaria || e.modulos.documentos) (e.google.conectado ? pronto : pendente).push('Google (agenda, e-mail, Drive)');
-  if (e.modulos.social) { ((e.mia.cores.fundo && e.mia.cores.destaque) ? pronto : pendente).push('marca da MIA'); (e.instagram ? pronto : pendente).push('Instagram'); }
+  if (e.modulos.social) { ((e.mia.cores.fundo && e.mia.cores.destaque) ? pronto : pendente).push('marca da MIA'); if (e.instagram) pronto.push('Instagram'); else pendente.push(e.instagram_liberacao?.status === 'pendente' ? `Instagram (liberação de ${e.instagram_liberacao.arroba} em até 12 h — você recebe um aviso aqui)` : 'Instagram'); }
   const ideias = [
     e.modulos.secretaria && '🎤 "Olga, me lembra amanhã às 9h de ligar pro contador"',
     e.modulos.social && '📸 "MIA, cria um post sobre [seu assunto]" (ou mande uma foto com a ideia)',
@@ -151,6 +152,7 @@ export function rotasOnboarding(app) {
     return { tipo: 'logo', variante: s.variante, url: g.original };
   }));
 
+  app.post('/api/instagram/liberacao', auth, seguro(async (req) => { const l = await import('../integracoes/instagram-liberacao.js'); return l.solicitar(req.contaId, req.body?.arroba); }));
   app.post('/api/onboarding/teste', auth, seguro(req => testar(req.contaId).then(itens => ({ itens }))));
   app.post('/api/onboarding/concluir', auth, seguro(req => concluir(req.contaId)));
 }

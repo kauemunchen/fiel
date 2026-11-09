@@ -22,6 +22,10 @@ export async function governanca(msg, conta) {
   const t = orig.toLowerCase();
   const caso = (frag) => orig.slice(t.indexOf(frag), t.indexOf(frag) + frag.length); // mesmo trecho com a caixa original
   let m;
+  if ((m = orig.match(/^igok:(\d+)$/))) {
+    if (db.prepare('SELECT admin FROM contas WHERE id=?').get(conta.id)?.admin !== 1) return 'Esse botão é do suporte do Fiel.';
+    try { const l = await import('../integracoes/instagram-liberacao.js'); const r = await l.marcarLiberado(Number(m[1])); return `✅ Cliente avisado: ${r.arroba} liberado (conta #${r.conta_id}). Ele vai aceitar o convite e conectar.`; } catch (e) { return `Não consegui marcar: ${e.message}`; }
+  }
   if ((m = t.match(/^(?:me chamo|meu nome é|pode me chamar de)\s+(.+)$/))) { db.prepare('UPDATE contas SET nome_dono=? WHERE id=?').run(caso(m[1]), conta.id); return `Anotado, ${caso(m[1])}.`; }
   if ((m = t.match(/^(?:minha empresa é|a empresa é|empresa:)\s+(.+)$/))) { db.prepare('UPDATE contas SET empresa=? WHERE id=?').run(caso(m[1]), conta.id); return `Empresa principal: ${caso(m[1])}.`; }
   if ((m = t.match(/^(?:diretor,?\s*)?(ativa|liga|ativar|ligar)\s+(?:o|a|módulo|modulo)?\s*([\wçãõáéíóú ]+)$/))) {
