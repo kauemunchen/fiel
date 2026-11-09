@@ -1,0 +1,27 @@
+# Utilitário (manual): baixa arquivos de mídia gerados por IA (ex.: narração) e devolve como artifact.
+name: baixar-midia
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "URLs separadas por espaço"
+        required: true
+jobs:
+  baixar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar
+        env:
+          URLS: ${{ inputs.urls }}
+        run: |
+          mkdir -p midia; i=0
+          for u in $URLS; do
+            case "$u" in https://*.fal.media/*|https://fal.media/*) ;; *) echo "ignorado: $u"; continue;; esac
+            i=$((i+1)); curl -sSfL --max-time 120 -o "midia/$(printf %02d $i)_$(basename "$u")" "$u"
+          done
+          ls -la midia
+      - uses: actions/upload-artifact@v4
+        with:
+          name: midia
+          path: midia
+          retention-days: 1
