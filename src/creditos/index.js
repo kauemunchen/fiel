@@ -36,8 +36,8 @@ export const TARIFAS = {
   video_edicao: 5,       // corte, faixa, legenda, logo (ffmpeg)
   video_audio: 1,        // extrair/remover áudio
   fal_imagem: 4,         // imagem gerada por IA (fal.ai)
-  ia_imagem: 4,          // imagem gerada por IA (Imagen / OpenAI)
-  ia_edicao_imagem: 5,   // retoque por instrução / banner de produto
+  ia_imagem: 18,         // imagem "realista" (Gemini Flash Image) — mínimo; o valor real sai de tarifa() pela meta de margem
+  ia_edicao_imagem: 18,  // retoque por instrução / banner de produto — idem
   transcricao_min: 0.5,  // por minuto de áudio transcrito (além dos tokens)
 };
 export const PACOTES_PADRAO = [
@@ -107,7 +107,21 @@ export function debitar(contaId, quantidade, { tipo = 'debito', motivo = '', mod
   } catch (e) { console.error('[creditos] debitar', e.message); return null; }
 }
 export function debitarTokens(contaId, modulo, tokens, modelo) { if (!(tokens > 0)) return; return debitar(contaId, tokens / tokensPorCredito(), { motivo: `IA ${modelo || ''}`.trim(), modulo, ref: `tokens:${tokens}` }); }
-export function cobrar(contaId, item, { modulo = null, vezes = 1, ref = null } = {}) { const t = TARIFAS[item]; if (!t) return; return debitar(contaId, t * vezes, { motivo: item.replace(/_/g, ' '), modulo, ref }); }
+/** Créditos de um item. Imagens: calculado do custo (já com +15%) para manter a meta de margem no pacote de crédito mais barato,
+ *  descontada a taxa de cartão. Nunca abaixo do valor base de TARIFAS. */
+const DINAMICAS = new Set(['fal_imagem', 'ia_imagem', 'ia_edicao_imagem']);
+export function tarifa(item) {
+  const base = TARIFAS[item]; if (!DINAMICAS.has(item)) return base;
+  try {
+    const cfg = Object.fromEntries(db.prepare('SELECT chave, valor FROM custos_cfg').all().map(r => [r.chave, r.valor]));
+    const usd = cfg[item + '_usd']; if (!usd) return base;
+    const cambio = cfg.usd_brl || 5.6, meta = cfg.margem_meta ?? 0.75, pctCartao = cfg.mp_cartao_pct ?? 0.0499;
+    const menor = Math.min(...pacotes().filter(p => p.creditos > 0 && p.preco > 0).map(p => p.preco / p.creditos));
+    const fracCusto = 1 - meta - pctCartao; if (!(menor > 0) || fracCusto <= 0) return base;
+    return Math.max(base, Math.ceil(usd * cambio / (fracCusto * menor)));
+  } catch { return base; }
+}
+export function cobrar(contaId, item, { modulo = null, vezes = 1, ref = null } = {}) { const t = tarifa(item); if (!t) return; return debitar(contaId, t * vezes, { motivo: item.replace(/_/g, ' '), modulo, ref }); }
 /** Reparo: conta em trial que nunca recebeu o crédito de boas-vindas (nenhum movimento de crédito) recebe agora. */
 export function repararTrials() {
   const sem = db.prepare("SELECT c.id FROM contas c WHERE COALESCE(c.plano,'trial')='trial' AND COALESCE(c.admin,0)=0 AND NOT EXISTS (SELECT 1 FROM creditos_mov m WHERE m.conta_id=c.id AND m.tipo='trial')").all();

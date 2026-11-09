@@ -4,7 +4,13 @@ import { db } from './db/index.js';
 
 // Preços de referência atualizados (USD por 1M tokens, Google Gemini public pricing).
 // Fonte: ai.google.dev/pricing — ajuste em /admin → Custos se seu plano for diferente.
+// Preços pesquisados em 09/11/2026 + 15% de margem de segurança (o Google/fal podem reajustar sem aviso).
+export const MARGEM_SEGURANCA = 0.15;
+const S = (v) => +(v * (1 + MARGEM_SEGURANCA)).toFixed(6);
 export const PRECOS_PADRAO = {
+  // Gemini 3.x (o que o Fiel usa hoje). Flash 3.5–3.8: US$ 0,75 / 3,75 (promocional; lista 1,50 / 7,50) · Flash-Lite 3.x: US$ 0,30 / 2,50
+  'gemini-3x-flash_in': S(0.75), 'gemini-3x-flash_out': S(3.75),
+  'gemini-3x-flash-lite_in': S(0.30), 'gemini-3x-flash-lite_out': S(2.50),
   'gemini-2.5-pro_in': 1.25,   'gemini-2.5-pro_out': 10.00,  // prompts ≤200k. Acima: 2.50 / 15.00
   'gemini-2.5-flash_in': 0.30, 'gemini-2.5-flash_out': 2.50, // texto/imagem/vídeo. Áudio in: 1.00
   'gemini-flash-lite_in': 0.10,'gemini-flash-lite_out': 0.40,// Gemini 2.5 Flash-Lite
@@ -13,9 +19,9 @@ export const PRECOS_PADRAO = {
   'gemini-1.5-flash_in': 0.075,'gemini-1.5-flash_out': 0.30, // ≤128k. Acima: 0.15 / 0.60
   'gemini-1.5-pro_in': 1.25,   'gemini-1.5-pro_out': 5.00,   // ≤128k. Acima: 2.50 / 10.00
   // Fal.ai (USD por imagem) — flux/schnell que a MIA usa fica em torno de US$ 0,003
-  'fal_imagem_usd': 0.003,
+  'fal_imagem_usd': S(0.003),
   // Imagen 4 / OpenAI gpt-image e edição (Gemini Flash Image / FLUX Kontext) — ~US$ 0,04 por imagem
-  'ia_imagem_usd': 0.04, 'ia_edicao_imagem_usd': 0.04,
+  'ia_imagem_usd': S(0.0336), 'ia_edicao_imagem_usd': S(0.04), // Gemini Flash Image ~US$ 0,034 · edição (com reserva FLUX Kontext ~US$ 0,04)
   // Mercado Pago (fração do valor + taxa fixa em R$) — ajuste pelo SEU plano MP
   'mp_pix_pct': 0.0099, 'mp_pix_fixo': 0,
   'mp_cartao_pct': 0.0499, 'mp_cartao_fixo': 0.40,  // crédito liberação imediata; parcelado 4,98%+0,40 à vista
@@ -40,6 +46,9 @@ export const PRECOS_PADRAO = {
 const DEFAULTS_ANTIGOS = {
   'infra_mensal_brl': [60],
   'usd_brl': [5.5, 5.50],
+  'fal_imagem_usd': [0.003],            // → +15%
+  'ia_imagem_usd': [0.04],              // → Gemini Flash Image +15%
+  'ia_edicao_imagem_usd': [0.04],       // → +15%
 };
 
 export function prepararCustos() {
@@ -127,13 +136,15 @@ export function definirPreco(chave, valor) { prepararCustos(); db.prepare('INSER
 /** Casa o nome do modelo à chave de preço mais próxima (ex.: 'gemini-2.5-flash-002' → 'gemini-2.5-flash'). */
 function normalizaModelo(modelo) {
   const m = String(modelo || '').toLowerCase();
+  if (/gemini-3/.test(m) && m.includes('flash-lite')) return 'gemini-3x-flash-lite';
+  if (/gemini-3/.test(m) && m.includes('flash')) return 'gemini-3x-flash';
   if (m.includes('2.5-flash') && !m.includes('lite')) return 'gemini-2.5-flash';
   if (m.includes('2.5-pro')) return 'gemini-2.5-pro';
   if (m.includes('flash-lite')) return 'gemini-flash-lite';
   if (m.includes('2.0-flash')) return 'gemini-2.0-flash';
   if (m.includes('1.5-flash')) return 'gemini-1.5-flash';
   if (m.includes('1.5-pro')) return 'gemini-1.5-pro';
-  return 'gemini-2.5-flash';
+  return 'gemini-3x-flash'; // desconhecido: assume o mais caro em uso (conservador)
 }
 
 /** Custo de IA (USD → BRL) nos últimos N dias, podendo filtrar por conta. */
@@ -170,7 +181,7 @@ export async function matrizCustos() {
   const p = precos(); const cambio = p['usd_brl'] || 5.5;
   const { PACOTES, tokensPorCredito } = await import('./creditos/index.js');
   const TPC = tokensPorCredito();
-  const MODELOS = [['Gemini 2.5 Pro','gemini-2.5-pro'],['Gemini 2.5 Flash','gemini-2.5-flash'],['Gemini 2.5 Flash-Lite','gemini-flash-lite'],['Gemini 2.0 Flash','gemini-2.0-flash'],['Gemini 2.0 Flash-Lite','gemini-2.0-flash-lite'],['Gemini 1.5 Flash','gemini-1.5-flash'],['Gemini 1.5 Pro','gemini-1.5-pro']];
+  const MODELOS = [['Gemini Flash 3.x (+15%)','gemini-3x-flash'],['Gemini Flash-Lite 3.x (+15%)','gemini-3x-flash-lite'],['Gemini 2.5 Pro','gemini-2.5-pro'],['Gemini 2.5 Flash','gemini-2.5-flash'],['Gemini 2.5 Flash-Lite','gemini-flash-lite'],['Gemini 2.0 Flash','gemini-2.0-flash'],['Gemini 2.0 Flash-Lite','gemini-2.0-flash-lite'],['Gemini 1.5 Flash','gemini-1.5-flash'],['Gemini 1.5 Pro','gemini-1.5-pro']];
   const custo1k = (k) => (TPC * 0.7 * (p[k+'_in']||0) + TPC * 0.3 * (p[k+'_out']||0)) / 1e6 * cambio;
   const modelos = MODELOS.map(([nome, chave]) => ({ nome, chave, r_por_1k: +custo1k(chave).toFixed(5) }));
   const matriz = PACOTES.map(pac => ({ pacote: pac.nome, tipo: pac.tipo, preco: pac.preco, creditos: pac.creditos, por_modelo: MODELOS.map(([nome, chave]) => { const custo = custo1k(chave) * pac.creditos; const taxa = pac.preco * (p['mp_pix_pct']||0) + (p['mp_pix_fixo']||0); const lucro = pac.preco - custo - taxa; return { modelo: nome, custo_ia: +custo.toFixed(2), lucro: +lucro.toFixed(2), margem_pct: pac.preco > 0 ? +(lucro / pac.preco * 100).toFixed(1) : 0 }; }) }));
@@ -181,12 +192,28 @@ export async function matrizCustos() {
  * Como o preço dos pacotes é fixo, calcula também "tokens_credito_max": quantos tokens
  * um crédito pode consumir para o pacote fechar com a meta (p['margem_meta']) de margem líquida.
  * O menor valor entre todos os pacotes vira a tarifa recomendada (TOKENS_POR_CREDITO sugerido). */
+const MODULOS_ECONOMICOS = ['secretaria', 'documentos', 'financeiro'];
+/** USD por token no uso real dos últimos 30 dias: tokens de entrada e saída de cada assessor × preço do modelo que ele usa AGORA
+ *  (Olga/Tina/Estag no Flash-Lite; MIA, Diretor e o resto no Flash), já com +15%. Sem histórico: Flash com mix 70/30 (conservador). */
+export function custoPorTokenReferencia(p = precos()) {
+  const pr = (k) => (p[k] ?? PRECOS_PADRAO[k]);
+  const fallback = (0.7 * pr('gemini-3x-flash_in') + 0.3 * pr('gemini-3x-flash_out')) / 1e6;
+  try {
+    const rows = db.prepare("SELECT modulo, SUM(COALESCE(tokens_in,0)) ti, SUM(COALESCE(tokens_out,0)) tout FROM uso WHERE criado_em >= datetime('now','-30 days') GROUP BY modulo").all();
+    let usd = 0, tok = 0;
+    for (const r of rows) {
+      const m = MODULOS_ECONOMICOS.includes(r.modulo) ? 'gemini-3x-flash-lite' : 'gemini-3x-flash';
+      usd += ((r.ti || 0) * pr(m + '_in') + (r.tout || 0) * pr(m + '_out')) / 1e6; tok += (r.ti || 0) + (r.tout || 0);
+    }
+    return tok > 20000 ? usd / tok : fallback;
+  } catch { return fallback; }
+}
 export async function margemPacotes() {
   const p = precos(); const cambio = p['usd_brl'] || 5.5; const metaFrac = p['margem_meta'] ?? 0.75;
   const { PACOTES, tokensPorCredito } = await import('./creditos/index.js' /* resolved relative to this file */);
   const TPC = tokensPorCredito();
-  // Custo por token (BRL) no Gemini 2.5 Flash, mix 70% in + 30% out
-  const custoPorTokenBRL = (0.7 * p['gemini-2.5-flash_in'] + 0.3 * p['gemini-2.5-flash_out']) / 1e6 * cambio;
+  // Custo por token (BRL), já com +15%: uso real (entrada/saída) de cada assessor nos últimos 30 dias × modelo atual de cada um.
+  const custoPorTokenBRL = custoPorTokenReferencia(p) * cambio;
   const custoIAperCred = TPC * custoPorTokenBRL;
   // Tokens-por-crédito que cada pacote comporta mantendo a meta pela forma Pix / Cartão
   const tokensMax = (pac, pct, fixo) => {

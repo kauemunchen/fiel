@@ -1,17 +1,18 @@
 // Proteção de consumo: cada mensagem do dono gera no máximo 1 peça visual e 1 rascunho de post,
 // a menos que ele tenha pedido uma quantidade ("faz 3 posts") ou aprovado o lote depois da pergunta.
 // Peças extras viram uma pergunta com o custo estimado — nunca geração em série por conta própria.
-import { TARIFAS } from '../creditos/index.js';
+import { TARIFAS, tarifa } from '../creditos/index.js';
 
 // créditos aproximados por peça (render/fal; os tokens de IA da escrita somam ~1–2 créditos)
+// getters: o custo das imagens acompanha a tarifa dinâmica (preço do provedor + margem)
 export const CUSTO_PECA = {
-  gerar_carrossel: TARIFAS.render_carrossel + 2,
-  gerar_frase: TARIFAS.render_imagem + 1,
-  gerar_midia: TARIFAS.fal_imagem,
-  aplicar_marca: TARIFAS.render_imagem,
-  remover_audio: TARIFAS.video_audio + TARIFAS.video_edicao,
-  editar_imagem: TARIFAS.ia_edicao_imagem,
-  banner_produto: TARIFAS.ia_edicao_imagem,
+  get gerar_carrossel() { return TARIFAS.render_carrossel + 2; },
+  get gerar_frase() { return TARIFAS.render_imagem + 1; },
+  get gerar_midia() { return `${tarifa('fal_imagem')} (FLUX) a ${tarifa('ia_imagem')} (realista)`; },
+  get aplicar_marca() { return TARIFAS.render_imagem; },
+  get remover_audio() { return TARIFAS.video_audio + TARIFAS.video_edicao; },
+  get editar_imagem() { return tarifa('ia_edicao_imagem'); },
+  get banner_produto() { return tarifa('ia_edicao_imagem'); },
 };
 const NOME = { editar_imagem: 'retoque de imagem', banner_produto: 'banner de produto', gerar_carrossel: 'carrossel', gerar_frase: 'arte de frase', gerar_midia: 'imagem com IA', aplicar_marca: 'marca d\'água', remover_audio: 'vídeo sem áudio' };
 const RASCUNHO = new Set(['criar_post']);

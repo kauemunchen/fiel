@@ -24,7 +24,7 @@ export function inferirBotoes(texto = '') {
   if (/\baprov\w*\b[^?\n]{0,40}\bajust\w*\b[^?\n]{0,40}\b(refa\w*|outra|nova vers)/i.test(fim)) return [[{ t: '✅ Aprovar', d: 'aprovar' }, { t: '✏️ Ajustar', d: 'quero ajustar' }, { t: '🔄 Refazer', d: 'refazer' }]];
   if (/\bpublicar agora\b[^?\n]{0,40}\bagendar\b[^?\n]{0,40}\bcancel/i.test(fim)) return [[{ t: '📣 Publicar agora', d: 'publicar agora' }, { t: '📅 Agendar', d: 'agendar' }], [{ t: '❌ Cancelar', d: 'cancelar' }]];
   if (/\bagend\w*/i.test(fim) && /\bpublicar agora\b/i.test(fim) && /\bajust\w*/i.test(fim)) return [[{ t: '📅 Agendar como sugerido', d: 'aprovado, agenda no horário sugerido' }, { t: '📣 Publicar agora', d: 'publicar agora' }], [{ t: '✏️ Ajustar', d: 'quero ajustar' }]];
-  if (/\bflux\b[^?\n]{0,30}\bimagen\b/i.test(fim)) return [[{ t: '⚡ FLUX', d: 'FLUX' }, { t: '📸 Imagen', d: 'Imagen' }]];
+  if (/\bflux\b[^?\n]{0,30}\b(realista|imagen)\b/i.test(fim)) return [[{ t: '⚡ FLUX (rápida)', d: 'FLUX' }, { t: '📸 Realista', d: 'Realista' }]];
   // 2) sim/não explícito
   if (/\(sim\s*\/\s*n[ãa]o\)|\bconfirma(r)?\??\s*$|\bconfirma o envio\??|\bposso (enviar|publicar|cancelar|seguir)\??|\bquer que eu\b.*\?\s*$|\baprova\??\s*$|\bpode ser\??\s*$|\bt[áa] certo\??\s*$|\bok\??\s*$/im.test(fim)) return SIM_NAO;
   // 3) pares conhecidos

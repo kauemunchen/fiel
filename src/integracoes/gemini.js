@@ -21,6 +21,27 @@ const CADEIA = [...new Set([
   'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.1-flash-lite',
 ].map(m => (m || '').trim()).filter(Boolean))];
 const RAPIDO = process.env.MODELO_RAPIDO || 'gemini-3.1-flash-lite';
+// Econômico (Olga, Tina, Estag e tarefas simples): Flash-Lite custa ~60% menos na entrada que o Flash.
+const ECONOMICO = process.env.MODELO_ECONOMICO || 'gemini-3.5-flash-lite';
+// Modelos que a chave enxerga de fato (ListModels, a cada 6 h): a cadeia pula os que o Google desligou.
+let _ativos = null, _ativosEm = 0;
+export async function atualizarModelosAtivos() {
+  try {
+    const nomes = new Set(); let token = '';
+    for (let i = 0; i < 10; i++) {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${process.env.GEMINI_API_KEY}${token ? '&pageToken=' + token : ''}`).then(r => r.json());
+      for (const m of r.models || []) nomes.add(String(m.name).replace(/^models\//, ''));
+      if (!r.nextPageToken) break; token = r.nextPageToken;
+    }
+    if (nomes.size) { _ativos = nomes; _ativosEm = Date.now(); }
+  } catch (e) { console.warn('[gemini] lista de modelos indisponível:', e.message); }
+  return _ativos;
+}
+export const modelosAtivos = () => _ativos;
+/** Primeiro modelo da lista de preferência que a chave tem (sem lista: o primeiro). */
+export function escolherModelo(preferidos) { const disp = _ativos; return (disp && preferidos.find(m => disp.has(m))) || preferidos[0]; }
+const filtrarAtivos = (cadeia) => { if (!_ativos) return cadeia; const ok = cadeia.filter(m => _ativos.has(m)); return ok.length ? ok : cadeia; };
+if (process.env.GEMINI_API_KEY && process.env.NODE_ENV !== 'test') { atualizarModelosAtivos(); setInterval(atualizarModelosAtivos, 6 * 3600e3).unref?.(); }
 // Contexto de uso (de quem é a chamada de IA, para debitar créditos). Dentro de rodarComContexto() cada execução
 // tem o seu (tarefas em segundo plano não se misturam com conversas); fora dele, vale o objeto global como antes.
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -29,8 +50,9 @@ export const contextoUso = new Proxy(_global, { get: (t, k) => (_als.getStore() 
 export const rodarComContexto = (ctx, fn) => _als.run({ contaId: null, modulo: null, ...ctx }, fn);
 let _creditos = null; import('../creditos/index.js').then(m => { _creditos = m; }).catch(() => {});
 let _registrar = null; import('../canal/api-marca.js').then(m => { _registrar = m.registrarUso; }).catch(() => {});
-export const modelo = (opts = {}, { rapido = false } = {}) => {
-  const cadeia = rapido ? [RAPIDO, ...CADEIA.filter(x => x !== RAPIDO)] : CADEIA;
+export const modelo = (opts = {}, { rapido = false, economico = false } = {}) => {
+  const primeiro = rapido ? RAPIDO : economico ? ECONOMICO : null;
+  const cadeia = filtrarAtivos(primeiro ? [primeiro, ...CADEIA.filter(x => x !== primeiro)] : CADEIA);
   const m = genai.getGenerativeModel({ model: cadeia[0], ...opts }, { timeout: TIMEOUT_MS });
   m.generateContent = async (...a) => {
     if (_creditos && contextoUso.contaId && !_creditos.podeUsar(contextoUso.contaId, { tolerancia: 3 })) throw new Error('sem créditos: recarregue em Créditos no app ou mande "comprar"');

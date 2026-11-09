@@ -83,7 +83,8 @@ FORMATO (canal de mensagem, não é documento): sem títulos com #, sem tabelas,
   const toolsConfig = montarTools(decls, modulo, conta);
   // Quando mistura functionDeclarations + googleSearch (built-in), Gemini exige esta flag.
   const extraCfg = temBuscaWeb && decls?.length ? { toolConfig: { includeServerSideToolInvocations: true } } : {};
-  let m = modelo({ systemInstruction, tools: toolsConfig, ...extraCfg });
+  const economico = ['secretaria', 'documentos', 'financeiro'].includes(modulo); // MIA e Diretor ficam no Flash (qualidade)
+  let m = modelo({ systemInstruction, tools: toolsConfig, ...extraCfg }, { economico });
   const corta = (t, n = 1800) => (t || '').length > n ? (t || '').slice(0, n) + ' […]' : (t || '');
   const contents = [];
   for (const h of historicoRecente(conta.id, 8)) {
@@ -102,7 +103,7 @@ FORMATO (canal de mensagem, não é documento): sem títulos com #, sem tabelas,
       // Nesse caso, derruba a busca web para esta conversa e segue com function calling puro.
       if (/googleSearch|google_search|tool.*only.*one|cannot.*combine|not.*supported.*together|include_server_side_tool_invocations/i.test(String(e?.message || ''))) {
         console.warn('[ia] googleSearch não suportado neste request — degradando sem busca web:', String(e?.message).slice(0, 160));
-        m = modelo({ systemInstruction, tools: decls.length ? [{ functionDeclarations: decls }] : undefined });
+        m = modelo({ systemInstruction, tools: decls.length ? [{ functionDeclarations: decls }] : undefined }, { economico });
         r = await m.generateContent({ contents });
       } else { throw e; }
     }

@@ -59,7 +59,7 @@ Toda etapa termina pedindo decisão com estas palavras, para virar botão: "Apro
 - POST FRASE: tema → UMA frase de 5 a 15 palavras, sem aspas (aprova/ajusta/refaz) → paleta: cores da marca (padrão), preto, copa, azul, vinho ou personalizada (pede cor de fundo e de destaque em hex) → gerar_frase → legenda de até 5 linhas com CTA no fim → hashtags → prévia.
 - CARROSSEL: tema → instruções de estilo (ou "padrão" = identidade da marca) → paleta → quantos slides de conteúdo (3, 4 ou 5) → gerar_carrossel → slides (aprova/refaz/editar texto: gere de novo com as instruções) → legenda de até 5 linhas com CTA → hashtags → prévia.
 - STORY: texto em até 3 telas (TELA 1 / TELA 2 / TELA 3) → imagem: gerar com IA, da biblioteca ou enviar nova → prévia → publicar/agendar. Story não leva hashtags nem legenda.
-- IMAGEM COM IA: pergunte numa mensagem só qual IA (FLUX = rápido e barato · Imagen = mais realista) e o formato (feed 4:5, quadrado 1:1, story 9:16, paisagem 16:9) → gerar_midia → aprova/retocar (editar_imagem com a instrução) /gerar outra.
+- IMAGEM COM IA: pergunte numa mensagem só qual IA (FLUX = rápida e barata · Realista = mais fotográfica, custa mais créditos) e o formato (feed 4:5, quadrado 1:1, story 9:16, paisagem 16:9) → gerar_midia → aprova/retocar (editar_imagem com a instrução) /gerar outra.
 - BANNER DE PRODUTO: o dono manda a foto do produto + descreve o cenário → banner_produto (mantém o produto idêntico, troca só o fundo) → aprova/ajusta.
 - RETOQUE: "mais contraste", "fundo mais claro", "tom mais quente" sobre uma imagem → editar_imagem.
 - PAUTA SEMANAL: gerar_pauta (7 dias: dia, formato, pilar, tema, gancho, horário). Mostre em lista; só salve como rascunhos se o dono pedir.
