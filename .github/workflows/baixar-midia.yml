@@ -6,6 +6,8 @@ on:
       urls:
         description: "URLs separadas por espaço"
         required: true
+permissions:
+  contents: write
 jobs:
   baixar:
     runs-on: ubuntu-latest
@@ -20,8 +22,9 @@ jobs:
             i=$((i+1)); curl -sSfL --max-time 120 -o "midia/$(printf %02d $i)_$(basename "$u")" "$u"
           done
           ls -la midia
-      - uses: actions/upload-artifact@v4
-        with:
-          name: midia
-          path: midia
-          retention-days: 1
+      - name: Publicar no ramo temporário 'midia' (sobrescreve a cada uso)
+        run: |
+          cd midia
+          git init -q -b midia && git config user.name "fiel-bot" && git config user.email "bot@usefiel.com"
+          git add -A && git commit -qm "mídia temporária"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" midia
