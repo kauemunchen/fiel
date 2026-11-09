@@ -36,7 +36,11 @@ export async function concluir(state, code) {
     body: new URLSearchParams({ client_id: APP_ID(), client_secret: SECRET(), grant_type: 'authorization_code', redirect_uri: REDIRECT(), code: limpo }),
   }).then(r => r.json());
   const tokCurto = curto.access_token || curto.data?.[0]?.access_token;
-  if (!tokCurto) throw new Error(curto.error_message || curto.error?.message || 'a Meta não devolveu o token');
+  if (!tokCurto) {
+    const m = String(curto.error_message || curto.error?.message || 'a Meta não devolveu o token');
+    if (/insufficient developer role|fun[çc][ãa]o de desenvolvedor/i.test(m)) throw new Error('Este perfil do Instagram ainda não está liberado no Fiel (falta ser Testador do Instagram e aceitar o convite em Instagram → Configurações → Apps e sites → Convites de testador)');
+    throw new Error(m.split(':')[0] === m.split(':')[1]?.trim() ? m.split(':')[0] : m);
+  }
   const longo = await fetch(`https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${encodeURIComponent(SECRET())}&access_token=${encodeURIComponent(tokCurto)}`).then(r => r.json());
   const token = longo.access_token || tokCurto;
   const me = await fetch(`https://graph.instagram.com/me?fields=user_id,username,account_type&access_token=${encodeURIComponent(token)}`).then(r => r.json());
