@@ -82,13 +82,7 @@ export class WebCanal {
       try { const c = await import('../creditos/index.js'); c.concederTrial(contaId); } catch (e) { console.error('[cadastro] trial NÃO concedido para conta', contaId, e.message); }
       const tok = crypto.randomBytes(24).toString('hex'); db.prepare('INSERT INTO web_sessoes (token, conta_id, chat_id) VALUES (?,?,?)').run(tok, contaId, chatSinteico);
       setCookie(res, tok);
-      // Mensagem de boas-vindas: já cai no histórico do app, para o dono encontrar o manual sem precisar mandar nada antes
-      try {
-        const base = process.env.WEBAPP_URL || process.env.PUBLIC_URL || '';
-        const linkManual = base ? `${base.replace(/\/$/, '')}/ajuda` : '/ajuda';
-        const boasVindas = `👋 Bem-vindo ao *Fiel*, ${nome.split(' ')[0]}.\n_A equipe que você não precisou contratar._\n\nSou Alfred, o seu Diretor. Montei o time: *Olga* (Secretária — agenda, e-mails, planilhas), *Estag* (Documentos), *Tina* (Financeiro) e *MIA* (Instagram). Você delega — a gente resolve. Nada sai sem seu "sim".\n\nVocê começa com *250 créditos grátis* — nada expira.\n\n📖 *Antes de qualquer coisa*, dá uma lida no manual: ele leva você em 45 min do zero até o primeiro post publicado (Telegram, Google, Instagram, identidade de marca, tom de voz, FAQ):\n\n${linkManual}\n\n📱 *Suporte humano:* ola@usefiel.com · https://wa.me/5547933883929 — (47) 93388-3929\n\nQualquer dúvida, é só perguntar aqui. Como posso ajudar?`;
-        this.registrar(contaId, { direcao: 'saida', canal: 'bot', modulo: 'diretor', tipo: 'texto', texto: boasVindas });
-      } catch {}
+      // Boas-vindas oficial sai ao concluir o onboarding (api-onboarding.js), já com o que ficou configurado
       res.json({ ok: true, token: tok });
     });
 
@@ -246,7 +240,7 @@ export function concluirLogin(codigo, contaId, chatId) {
 }
 
 // multipart mínimo (um arquivo + campos de texto), sem dependências
-function lerMultipart(req) {
+export function lerMultipart(req) {
   return new Promise((resolve, reject) => {
     const chunks = []; req.on('data', c => chunks.push(c)); req.on('error', reject);
     req.on('end', () => {

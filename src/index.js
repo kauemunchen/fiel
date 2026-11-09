@@ -6,6 +6,7 @@ import { criarCanal } from './canal/index.js';
 import { tratarMensagem } from './orquestrador/roteador.js';
 import { comBotoes } from './orquestrador/botoes.js';
 import { rotasConfig } from './canal/api-config.js';
+import { rotasOnboarding } from './canal/api-onboarding.js';
 import { rotasMarca } from './canal/api-marca.js';
 import { rotasDados } from './canal/api-dados.js';
 import { iniciarRotinas } from './rotinas/scheduler.js';
@@ -52,6 +53,7 @@ app.get('/', (_, res) => res.redirect('/app'));
 const canal = criarCanal(process.env.CANAL || 'telegram', app, servidor);
 setCanal(canal);
 rotasConfig(app);
+rotasOnboarding(app);
 rotasMarca(app);
 rotasDados(app);
 import('./canal/api-admin.js').then(a => a.rotasAdmin(app)).catch(e => console.error('admin', e.message));
@@ -79,7 +81,7 @@ app.get('/oauth/google/iniciar/:contaId', (req, res) => res.redirect(urlAutoriza
 app.get('/oauth/google/callback', async (req, res) => {
   const { state, code, error } = req.query;
   if (error || !code) { console.error('[oauth] google retornou erro:', error || 'sem code', req.query); return res.status(400).send(`Google não autorizou: ${error || 'sem código'}. Volte ao Telegram e peça "conectar google" de novo.`); }
-  try { const { contaDoEstado } = await import('./integracoes/google-calendar.js'); await salvarCodigo(contaDoEstado(state), code); res.send('Google conectado. Pode voltar ao Fiel (app ou Telegram).'); }
+  try { const { contaDoEstado } = await import('./integracoes/google-calendar.js'); await salvarCodigo(contaDoEstado(state), code); res.send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><body style="font-family:system-ui;padding:40px;text-align:center"><h2>✅ Google conectado</h2><p>Pode voltar ao Fiel (app ou Telegram).</p><script>try{if(window.opener){window.opener.postMessage('fiel:google-ok','*');setTimeout(()=>window.close(),900)}}catch(e){}</script>`); }
   catch (e) { console.error('[oauth] falha ao salvar token:', e?.message); res.status(500).send(`Erro ao conectar: ${e?.message}`); }
 });
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e?.stack || e));

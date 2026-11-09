@@ -47,6 +47,10 @@ export function passos(contaId) {
     { id: 'extrato', titulo: 'Mandar um extrato para a Tina', detalhe: 'O arquivo do banco (OFX ou CSV) com o nome da empresa.', feito: existe("SELECT 1 FROM fin_lancamentos WHERE conta_id=? AND origem IN ('extrato','boleto')", contaId) || existe('SELECT 1 FROM fin_importacoes WHERE conta_id=?', contaId) },
   ];
   const c = db.prepare('SELECT guia_dispensado, plano, admin FROM contas WHERE id=?').get(contaId) || {};
+  // só os passos da equipe ativa
+  const lig = new Set(db.prepare('SELECT modulo FROM modulos WHERE conta_id=? AND ligado=1').all(contaId).map(x => x.modulo));
+  const precisa = { google: lig.has('secretaria') || lig.has('documentos'), audio: true, telegram: true, post: lig.has('social'), extrato: lig.has('financeiro') };
+  for (let k = lista.length - 1; k >= 0; k--) if (!precisa[lista[k].id]) lista.splice(k, 1);
   const feitos = lista.filter(p => p.feito).length;
   return { passos: lista, feitos, total: lista.length, completo: feitos === lista.length, dispensado: !!c.guia_dispensado };
 }

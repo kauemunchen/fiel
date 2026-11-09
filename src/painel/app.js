@@ -55,6 +55,7 @@ async function iniciar() {
   try { me = await api('/api/me'); } catch { return; }
   $('#login').classList.add('oculto'); $('#app').classList.remove('oculto');
   $('#donoNome').textContent = me.conta.nome_dono;
+  if (me.conta.admin !== 1) setTimeout(() => window.verificarOnboarding?.(), 0);
   if (me.conta.admin === 1) $('#btAdmin').classList.remove('oculto');
   if (me.creditos) {
     const c = me.creditos; const pct = c.ilimitada ? 100 : Math.max(0, Math.min(100, c.saldo / (c.base || 1) * 100));
