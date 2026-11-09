@@ -414,3 +414,6 @@ body.onb-aberto{overflow:hidden}
 .onb-intro{text-align:center;padding:30px 24px 20px}
 .onb-intro .onb-link{display:block;margin:10px auto 0}
 .onb-selo{width:52px;height:52px;border-radius:16px;background:var(--coral);color:#fff;font-family:var(--f-display);font-size:28px;display:grid;place-items:center;margin:0 auto 6px}
+
+.onb-check{display:flex!important;gap:8px;align-items:center;margin:12px 0 0!important;color:var(--texto)!important;font-size:13.5px!important}
+.onb-check input{width:18px;height:18px;accent-color:var(--coral)}

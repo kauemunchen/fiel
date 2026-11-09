@@ -7,6 +7,7 @@ import { db } from '../db/index.js';
 db.exec(`CREATE TABLE IF NOT EXISTS marca_kit (conta_id INTEGER PRIMARY KEY, dados TEXT NOT NULL, atualizado_em TEXT DEFAULT CURRENT_TIMESTAMP)`);
 
 const HEX = /^#?[0-9a-f]{6}$/i;
+export const POSICOES = ['inferior-direito', 'inferior-esquerdo', 'superior-direito', 'superior-esquerdo'];
 const normHex = (v) => { const s = String(v || '').trim(); if (!HEX.test(s)) return null; return ('#' + s.replace('#', '')).toUpperCase(); };
 const ehAdmin = (contaId) => db.prepare('SELECT admin FROM contas WHERE id=?').get(contaId)?.admin === 1;
 
@@ -30,6 +31,7 @@ export function salvarKit(contaId, campos = {}) {
   if (campos.fontes !== undefined) novo.fontes = String(campos.fontes || '').slice(0, 120);
   if (campos.observacoes !== undefined) novo.observacoes = String(campos.observacoes || '').slice(0, 1500);
   if (campos.marca_dagua_auto !== undefined) novo.marca_dagua_auto = !!campos.marca_dagua_auto;
+  if (campos.logo_posicao !== undefined && POSICOES.includes(campos.logo_posicao)) novo.logo_posicao = campos.logo_posicao;
   novo.logos = novo.logos || {};
   db.prepare('INSERT INTO marca_kit (conta_id, dados) VALUES (?,?) ON CONFLICT(conta_id) DO UPDATE SET dados=excluded.dados, atualizado_em=CURRENT_TIMESTAMP').run(contaId, JSON.stringify(novo));
   return lerKit(contaId);
@@ -68,6 +70,9 @@ export function marcaDaguaAutomatica(contaId) {
   if (usaKM(contaId)) return true;
   const k = lerKit(contaId); return !!(k?.marca_dagua_auto && temLogo(contaId));
 }
+/** Opção do cliente: logo SEMPRE nas imagens (fotos enviadas, geradas por IA, retocadas e banners). Precisa ter logo. */
+export function logoEmImagens(contaId) { const k = lerKit(contaId); return !!(k?.marca_dagua_auto && temLogo(contaId)); }
+export function posicaoLogo(contaId) { return lerKit(contaId)?.logo_posicao || 'inferior-direito'; }
 export function temLogo(contaId) { if (usaKM(contaId)) return true; const l = lerKit(contaId)?.logos || {}; return !!(l.principal || l.claro || l.escuro); }
 
 const cacheB64 = new Map();
@@ -97,5 +102,5 @@ export function resumoParaPrompt(contaId) {
   const conta = db.prepare('SELECT empresa FROM contas WHERE id=?').get(contaId) || {};
   if (!k) return `IDENTIDADE VISUAL: ainda NÃO cadastrada para ${conta.empresa || 'esta empresa'}. Antes de criar arte (carrossel, frase, story), peça ao dono: cores da marca (fundo e destaque, em hex se tiver), o @ do Instagram e as logos (versão clara e escura) — ou o manual da marca. Sem isso, a arte sai em cores neutras e sem logo.`;
   const l = k.logos || {};
-  return `IDENTIDADE VISUAL DE ${(k.nome || conta.empresa || '').toUpperCase()} (cadastrada — use SEMPRE; nunca use a identidade KM):\n- Cores: fundo ${k.cores?.fundo || '(não definido)'} · título ${k.cores?.titulo || 'automático'} · destaque ${k.cores?.destaque || '(não definido)'} · apoio ${k.cores?.apoio || 'automático'}\n- Assinatura: ${k.assinatura || '(sem @)'}${k.fontes ? `\n- Fontes do manual: ${k.fontes} (o render usa Poppins)` : ''}\n- Logos: ${['principal', 'claro', 'escuro'].filter(v => l[v]).join(', ') || 'nenhuma ainda'}${k.observacoes ? `\n- Regras do manual: ${k.observacoes}` : ''}`;
+  return `IDENTIDADE VISUAL DE ${(k.nome || conta.empresa || '').toUpperCase()} (cadastrada — use SEMPRE; nunca use a identidade KM):\n- Cores: fundo ${k.cores?.fundo || '(não definido)'} · título ${k.cores?.titulo || 'automático'} · destaque ${k.cores?.destaque || '(não definido)'} · apoio ${k.cores?.apoio || 'automático'}\n- Assinatura: ${k.assinatura || '(sem @)'}${k.fontes ? `\n- Fontes do manual: ${k.fontes} (o render usa Poppins)` : ''}\n- Logos: ${['principal', 'claro', 'escuro'].filter(v => l[v]).join(', ') || 'nenhuma ainda'}${k.observacoes ? `\n- Regras do manual: ${k.observacoes}` : ''}\n- Logo nas imagens: ${k.marca_dagua_auto ? `SEMPRE (o sistema aplica sozinho em fotos, imagens de IA, retoques e banners, canto ${k.logo_posicao || 'inferior-direito'}; se o dono pedir "sem logo" numa imagem, use sem_logo=true)` : 'só quando o dono pedir (aplicar_marca)'}`;
 }

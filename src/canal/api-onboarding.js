@@ -29,7 +29,7 @@ export async function estado(contaId) {
     instagram: !!db.prepare('SELECT 1 FROM instagram_auth WHERE conta_id=?').get(contaId),
     instagram_url: (await import('../integracoes/instagram-oauth.js')).urlAutorizacao(contaId),
     instagram_liberacao: (await import('../integracoes/instagram-liberacao.js')).statusDaConta(contaId),
-    mia: { identidade: identidade(contaId) || {}, cores: k.cores || {}, assinatura: k.assinatura || '', logos: Object.keys(k.logos || {}).filter(v => k.logos[v]), fontes: k.fontes || '' },
+    mia: { identidade: identidade(contaId) || {}, cores: k.cores || {}, assinatura: k.assinatura || '', logos: Object.keys(k.logos || {}).filter(v => k.logos[v]), fontes: k.fontes || '', logo_sempre: !!k.marca_dagua_auto },
   };
 }
 
@@ -127,6 +127,7 @@ export function rotasOnboarding(app) {
       if (dados.cor_fundo) campos.cores.fundo = dados.cor_fundo;
       if (dados.cor_destaque) campos.cores.destaque = dados.cor_destaque;
       if (arroba) campos.assinatura = arroba;
+      if (dados.logo_sempre !== undefined) campos.marca_dagua_auto = !!dados.logo_sempre;
       if (!kit.lerKit(id)?.nome && conta.empresa) campos.nome = conta.empresa;
       kit.salvarKit(id, campos);
     } else throw new Error('etapa inválida');

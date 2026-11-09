@@ -40,7 +40,7 @@ export function rotasMarca(app) {
   // ---------- Kit visual da marca (clientes) ----------
   app.post('/api/marca/kit', auth, async (req, res) => {
     const kitM = await import('../integracoes/marca-kit.js'); const b = req.body || {};
-    res.json(kitM.salvarKit(req.contaId, { nome: b.nome, assinatura: b.assinatura, cores: b.cores || {}, marca_dagua_auto: b.marca_dagua_auto }));
+    res.json(kitM.salvarKit(req.contaId, { nome: b.nome, assinatura: b.assinatura, cores: b.cores || {}, marca_dagua_auto: b.marca_dagua_auto, logo_posicao: b.logo_posicao }));
   });
   app.post('/api/marca/kit/logo', auth, async (req, res) => {
     try {

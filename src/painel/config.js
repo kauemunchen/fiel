@@ -125,7 +125,11 @@ telas.marca = async () => {
         <div class="campo"><label>@ do Instagram</label><input name="assinatura" value="${esc(k.assinatura || '')}" placeholder="@suamarca"></div>
         ${corInput('fundo', 'Cor de fundo das artes', 'ex.: #2B2B2B')}${corInput('destaque', 'Cor de destaque', 'ex.: #D9542F')}${corInput('titulo', 'Cor do título (opcional)', 'automática')}${corInput('apoio', 'Cor do texto de apoio (opcional)', 'automática')}
       </div>
-      <label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input type="checkbox" name="marca_dagua_auto" ${k.marca_dagua_auto ? 'checked' : ''}> Aplicar minha logo automaticamente nas fotos que eu enviar <span class="d" style="font-size:12px">(desligado = só quando eu pedir)</span></label>
+      <div class="campo" style="margin:12px 0"><label>Logo da empresa nas imagens</label>
+        <label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="radio" name="logo_modo" value="sempre" ${k.marca_dagua_auto ? 'checked' : ''}> <b>Sempre</b> — fotos que eu enviar, imagens geradas por IA, retoques e banners</label>
+        <label style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="radio" name="logo_modo" value="pedir" ${k.marca_dagua_auto ? '' : 'checked'}> <b>Só quando eu pedir</b></label>
+        <label style="margin-top:6px">Posição</label><select name="logo_posicao">${['inferior-direito', 'inferior-esquerdo', 'superior-direito', 'superior-esquerdo'].map(p => `<option value="${p}" ${(k.logo_posicao || 'inferior-direito') === p ? 'selected' : ''}>${p.replace('-', ' ')}</option>`).join('')}</select>
+        ${d.logos?.length ? '' : '<p class="d">⚠️ Envie a logo abaixo para a opção "Sempre" funcionar.</p>'}<p class="d">Carrossel, frase e story já saem com a logo pelo layout da marca.</p></div>
       <div style="display:flex;align-items:center;gap:10px"><button class="btn prim">Salvar kit</button><span class="salvo"></span></div></form>
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:16px;align-items:flex-start">
         ${slotLogo('principal', 'Logo principal', '#F3F3F3')}${slotLogo('claro', 'Versão clara (fundo escuro)', '#2B2B2B')}${slotLogo('escuro', 'Versão escura (fundo claro)', '#FFFFFF')}
@@ -154,7 +158,7 @@ telas.marca = async () => {
     if ($('#fKit')) {
       document.querySelectorAll('[data-cor]').forEach(i => i.oninput = () => { const t = document.querySelector(`[name=cor_${i.dataset.cor}]`); t.value = i.value.toUpperCase(); i.style.opacity = 1; });
       $('#fKit').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
-        const r = await post('/api/marca/kit', { nome: f.get('nome'), assinatura: f.get('assinatura'), marca_dagua_auto: !!f.get('marca_dagua_auto'), cores: { fundo: f.get('cor_fundo'), destaque: f.get('cor_destaque'), titulo: f.get('cor_titulo'), apoio: f.get('cor_apoio') } });
+        const r = await post('/api/marca/kit', { nome: f.get('nome'), assinatura: f.get('assinatura'), marca_dagua_auto: f.get('logo_modo') === 'sempre', logo_posicao: f.get('logo_posicao'), cores: { fundo: f.get('cor_fundo'), destaque: f.get('cor_destaque'), titulo: f.get('cor_titulo'), apoio: f.get('cor_apoio') } });
         e.target.querySelector('.salvo').textContent = r?.erro ? r.erro : 'salvo ✓'; gerar(); };
       document.querySelectorAll('[data-logo]').forEach(inp => inp.onchange = async () => { const f = inp.files[0]; if (!f) return; if (f.size > 8e6) return toast('Imagem acima de 8 MB');
         const b64 = await new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(f); });

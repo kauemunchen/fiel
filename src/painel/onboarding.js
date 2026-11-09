@@ -60,6 +60,7 @@
       <div class="onb-lbl">Cores e logo <small>(toque na cor para escolher)</small></div>
       <div class="onb-cores"><label class="onb-cor">Cor principal<input type="color" id="oFundo" value="${escO(c.fundo || '#1F2A44')}"></label><label class="onb-cor">Cor de destaque<input type="color" id="oDestaque" value="${escO(c.destaque || '#E85D4A')}"></label>
         <button type="button" class="btn onb-sec" id="oArq">📎 Logo ou manual (PDF)</button><input type="file" id="oArqIn" accept="image/png,image/jpeg,image/webp,application/pdf" multiple hidden></div>
+      <label class="onb-check"><input type="checkbox" id="oLogoSempre"${E.mia.logo_sempre ? ' checked' : ''}> Colocar minha logo em <b>todas</b> as imagens (fotos, IA, retoques)</label>
       <div class="onb-dica" id="oMarcaStatus">${E.mia.logos.length ? `✅ ${E.mia.logos.length} logo(s) salva(s)` : 'Com o manual em PDF, a MIA lê as cores e fontes sozinha.'}</div>`,
       montar: () => { ['#oFundo', '#oDestaque'].forEach(q => $o(q).addEventListener('input', () => $o(q).dataset.mudou = '1')); if (c.fundo) $o('#oFundo').dataset.mudou = '1'; if (c.destaque) $o('#oDestaque').dataset.mudou = '1'; $o('#oArq').onclick = () => $o('#oArqIn').click(); $o('#oArqIn').onchange = async (ev) => {
         const st = $o('#oMarcaStatus');
@@ -71,7 +72,7 @@
             else st.textContent = `✅ Logo salva (${r.variante === 'claro' ? 'versão clara' : r.variante === 'escuro' ? 'versão escura' : r.variante})`;
           } catch (e) { st.textContent = '⚠️ ' + e.message; }
         } ev.target.value = ''; }; },
-      salvar: () => chamar('/api/onboarding/passo', { method: 'POST', body: { passo: 'mia', dados: { perfil: $o('#oPerfil').value, nicho: valorChip('nicho'), categoria: valorChip('nicho'), tom: valorChip('tomMarca'), cor_fundo: $o('#oFundo').dataset.mudou ? $o('#oFundo').value : '', cor_destaque: $o('#oDestaque').dataset.mudou ? $o('#oDestaque').value : '' } } }) }; },
+      salvar: () => chamar('/api/onboarding/passo', { method: 'POST', body: { passo: 'mia', dados: { perfil: $o('#oPerfil').value, nicho: valorChip('nicho'), categoria: valorChip('nicho'), tom: valorChip('tomMarca'), cor_fundo: $o('#oFundo').dataset.mudou ? $o('#oFundo').value : '', cor_destaque: $o('#oDestaque').dataset.mudou ? $o('#oDestaque').value : '', logo_sempre: $o('#oLogoSempre').checked } } }) }; },
 
     instagram: () => {
       const L = E.instagram_liberacao; const arrobaPad = (L?.arroba || E.mia.identidade?.perfil || E.mia.assinatura || '').trim();
