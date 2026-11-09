@@ -28,6 +28,7 @@ services:
       - GOOGLE_PICKER_KEY=AIzaSyAOJJwXw_nJtu1xGhTY2ShYEzDwptIxwMk
       # Login do Instagram (botão Conectar Instagram); INSTAGRAM_APP_ID/INSTAGRAM_APP_SECRET ficam no .env (o deploy grava a partir dos Secrets do GitHub)
       - INSTAGRAM_REDIRECT_URI=https://usefiel.com/oauth/instagram/callback
+      - INSTAGRAM_APP_ID=944365305284180
     build: .
     container_name: assessor-km
     restart: unless-stopped
