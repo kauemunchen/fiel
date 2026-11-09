@@ -7,6 +7,24 @@ import * as render from '../integracoes/render.js';
 import * as kit from '../integracoes/marca-kit.js';
 const MARCADOR = 'Social Media';
 /** Nome da marca/dono para os prompts: KM (admin) ou o cliente. */
+// Regras do bot KM: texto sem markdown; hashtag da marca SEMPRE a última (KM: #kauemunchen).
+export function limparTextoIA(t = '') {
+  return String(t || '').replace(/<[^>]+>/g, '').replace(/\*\*(.+?)\*\*/gs, '$1').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2').replace(/^>+\s*/gm, '').replace(/^[-*_]{3,}$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+export function hashtagMarca(contaId) {
+  const id = identidade(contaId) || {};
+  if (id.hashtag_marca) return '#' + String(id.hashtag_marca).replace(/^#/, '').trim();
+  if (kit.usaKM(contaId)) return '#kauemunchen';
+  const a = kit.lerKit(contaId)?.assinatura; return a ? '#' + a.replace(/^@/, '').replace(/[^\wÀ-ÿ]/g, '') : null;
+}
+/** Até 5 hashtags do tema + a da marca no fim (sem repetir). */
+export function hashtagsFinal(contaId, tags) {
+  const marca = hashtagMarca(contaId);
+  const lista = String(Array.isArray(tags) ? tags.join(' ') : tags || '').replace(/,/g, ' ').split(/\s+/).map(t => t.trim()).filter(Boolean).map(t => t.startsWith('#') ? t : '#' + t).map(t => t.replace(/[^#\wÀ-ÿ]/g, ''));
+  const unicas = [...new Set(lista.map(t => t.toLowerCase()))].map(l => lista.find(t => t.toLowerCase() === l));
+  const outras = unicas.filter(t => !marca || t.toLowerCase() !== marca.toLowerCase()).slice(0, 5);
+  return [...outras, ...(marca ? [marca] : [])].join(' ');
+}
 const quemE = (conta) => kit.usaKM(conta.id) ? 'Kauê München' : (kit.lerKit(conta.id)?.nome || conta.empresa || conta.nome_dono);
 const manualDe = (conta) => kit.usaKM(conta.id) ? 'o MANUAL DA MARCA KM' : `a identidade de ${quemE(conta)} (${kit.resumoParaPrompt(conta.id)?.replace(/\n/g, ' ') || 'sem kit cadastrado'})`;
 
@@ -15,12 +33,19 @@ const historico = (contaId, n = 5) => db.prepare("SELECT formato, tema, legenda,
 
 export function ferramentas(_conta) {
   return [
-    { name: 'definir_identidade', description: 'Salva/atualiza a identidade da marca para conteúdo (perfil, nicho, público, tom, pilares, hashtags fixas). Chame quando o dono descrever a marca.', parameters: { type: 'OBJECT', properties: { perfil: { type: 'STRING' }, nicho: { type: 'STRING' }, publico: { type: 'STRING' }, tom: { type: 'STRING' }, pilares: { type: 'STRING' }, hashtags_fixas: { type: 'STRING' }, descricao: { type: 'STRING' } } } },
+    { name: 'definir_identidade', description: 'Salva/atualiza a identidade da marca para conteúdo: nome e @perfil, nicho, categoria (ex.: Mentor, Imobiliária), público-alvo, tom de voz, descrição completa, pilares, hashtags fixas e a hashtag da marca (vai SEMPRE por último em todo post). Chame quando o dono descrever a marca. Se faltar algo, pergunte um campo por vez (1/6 nome e @, 2/6 nicho, 3/6 categoria, 4/6 público, 5/6 tom, 6/6 descrição).', parameters: { type: 'OBJECT', properties: { perfil: { type: 'STRING', description: 'nome e @, ex.: Kauê München | @kauemunchen' }, nicho: { type: 'STRING' }, categoria: { type: 'STRING' }, publico: { type: 'STRING' }, tom: { type: 'STRING' }, descricao: { type: 'STRING' }, pilares: { type: 'STRING' }, hashtags_fixas: { type: 'STRING' }, hashtag_marca: { type: 'STRING', description: 'ex.: #kauemunchen — sempre a última hashtag' } } } },
+    { name: 'gerar_pauta', description: 'Pauta editorial (padrão 7 dias): para cada dia, tema, formato (post/carrossel/frase/story/reels), horário sugerido, gancho e pilar — na identidade e no histórico da marca. Só sugere; salvar como rascunhos apenas se o dono pedir.', parameters: { type: 'OBJECT', properties: { dias: { type: 'NUMBER' }, foco: { type: 'STRING', description: 'tema/campanha da semana (opcional)' } } } },
+    { name: 'gerar_hashtags', description: 'Gera 5 hashtags estratégicas do nicho para um tema; a hashtag da marca entra automaticamente no fim.', parameters: { type: 'OBJECT', properties: { tema: { type: 'STRING' } }, required: ['tema'] } },
+    { name: 'editar_imagem', description: 'Retoca uma imagem existente por instrução (ex.: "mais contraste", "fundo mais claro", "tom mais quente"). Só quando o dono pedir. Devolve a URL nova.', parameters: { type: 'OBJECT', properties: { url: { type: 'STRING' }, instrucao: { type: 'STRING' } }, required: ['url', 'instrucao'] } },
+    { name: 'banner_produto', description: 'Banner de produto: a partir da FOTO do produto (URL), mantém o produto idêntico (rótulo, marca, cores) e troca só o fundo/cenário descrito. Use quando o dono mandar foto de produto pedindo banner/anúncio.', parameters: { type: 'OBJECT', properties: { url: { type: 'STRING', description: 'URL da foto do produto' }, cenario: { type: 'STRING', description: 'fundo/cenário desejado' } }, required: ['url', 'cenario'] } },
+    { name: 'renomear_midia', description: 'Renomeia uma mídia da biblioteca (pelo id).', parameters: { type: 'OBJECT', properties: { id: { type: 'NUMBER' }, nome: { type: 'STRING' } }, required: ['id', 'nome'] } },
+    { name: 'remover_midia', description: 'Remove uma mídia da biblioteca (pelo id). Pede confirmação.', parameters: { type: 'OBJECT', properties: { id: { type: 'NUMBER' } }, required: ['id'] } },
+    { name: 'ver_historico', description: 'Lista os últimos posts publicados (tipo, tema, data) — é a base de estilo que a MIA usa para manter o tom.', parameters: { type: 'OBJECT', properties: { max: { type: 'NUMBER' } } } },
     { name: 'ver_identidade', description: 'Mostra a identidade de marca salva', parameters: { type: 'OBJECT', properties: {} } },
     { name: 'gerar_legenda', description: 'Gera legenda no modelo do manual da marca (gancho, contexto, 3 pontos, CTA único, 5 hashtags = fixas + do pilar). Informe o pilar (um dos pilares da marca) e o objetivo do CTA (salvar|compartilhar|comentar|seguir|conversa|direct).', parameters: { type: 'OBJECT', properties: { tema: { type: 'STRING' }, formato: { type: 'STRING', description: 'post|carrossel|reels|story' }, pilar: { type: 'STRING', description: 'pilar de conteúdo da marca (KM: GESTÃO|NEGÓCIOS|IA|AUTOMAÇÃO; clientes: os pilares deles)' }, objetivo_cta: { type: 'STRING', description: 'salvar|compartilhar|comentar|seguir|conversa|direct' }, serie: { type: 'STRING', description: 'Antes do processo | Método 3R | Ferramenta da semana | (vazio)' }, ajuste: { type: 'STRING', description: 'instrução de ajuste sobre uma versão anterior' } }, required: ['tema', 'pilar'] } },
-    { name: 'gerar_midia', description: 'Gera imagem via fal.ai a partir de briefing visual (na identidade da marca). Retorna URL.', parameters: { type: 'OBJECT', properties: { briefing: { type: 'STRING' }, ratio: { type: 'STRING', description: '1:1|4:5|9:16' } }, required: ['briefing'] } },
-    { name: 'gerar_frase', description: 'Estático: frase forte (até 2 linhas) com UMA palavra na cor de destaque, etiqueta do pilar, nas cores e logo da marca da conta, 3:4. Retorna URL.', parameters: { type: 'OBJECT', properties: { frase: { type: 'STRING' }, palavra_dourada: { type: 'STRING', description: 'a palavra da frase que vai em dourado' }, pilar: { type: 'STRING', description: 'pilar de conteúdo da marca (KM: GESTÃO|NEGÓCIOS|IA|AUTOMAÇÃO; clientes: os pilares deles)' }, template: { type: 'STRING', description: 'manual (padrão) | km' }, paleta: { type: 'STRING' }, autoria: { type: 'STRING' } }, required: ['frase'] } },
-    { name: 'gerar_carrossel', description: 'Carrossel (6–8 slides, 3:4) NA IDENTIDADE DA CONTA (cores, @ e logo cadastrados no kit de marca): capa (etiqueta + título ≤8 palavras com UMA palavra em destaque + subtítulo) → problema → 3–5 conteúdo → resumo → CTA. Para transformar um texto pronto do dono, passe-o em texto_base. Retorna URLs + textos. Depois criar_post(formato=carrossel, midias_urls).', parameters: { type: 'OBJECT', properties: { tema: { type: 'STRING' }, texto_base: { type: 'STRING', description: 'texto pronto do dono a transformar em carrossel (mantenha as ideias dele)' }, pilar: { type: 'STRING', description: 'pilar de conteúdo da marca (KM: GESTÃO|NEGÓCIOS|IA|AUTOMAÇÃO; clientes: os pilares deles)' }, objetivo_cta: { type: 'STRING', description: 'salvar|compartilhar|comentar|seguir|conversa' }, qtd_conteudo: { type: 'NUMBER', description: 'slides de conteúdo, 3 a 5 (padrão 3)' }, instrucoes: { type: 'STRING' }, template: { type: 'STRING', description: 'manual (padrão) | km' }, paleta: { type: 'STRING' } }, required: ['tema', 'pilar'] } },
+    { name: 'gerar_midia', description: 'Gera imagem com IA a partir de briefing visual (na identidade da marca, sem texto na imagem). provedor: fal (FLUX, padrão, mais barato) | gemini (Imagen, mais realista) | openai (se disponível). Se o dono não disse qual IA ou formato, pergunte numa mensagem só ("FLUX ou Imagen? Feed 4:5, quadrado ou story 9:16?"). Retorna URL.', parameters: { type: 'OBJECT', properties: { briefing: { type: 'STRING' }, ratio: { type: 'STRING', description: '1:1|3:4|4:5|9:16|16:9' }, provedor: { type: 'STRING', description: 'fal|gemini|openai' } }, required: ['briefing'] } },
+    { name: 'gerar_frase', description: 'Estático: frase forte (até 2 linhas) com UMA palavra na cor de destaque, etiqueta do pilar, nas cores e logo da marca da conta, 3:4. Retorna URL.', parameters: { type: 'OBJECT', properties: { frase: { type: 'STRING' }, palavra_dourada: { type: 'STRING', description: 'a palavra da frase que vai em dourado' }, pilar: { type: 'STRING', description: 'pilar de conteúdo da marca (KM: GESTÃO|NEGÓCIOS|IA|AUTOMAÇÃO; clientes: os pilares deles)' }, template: { type: 'STRING', description: 'manual (padrão) | km' }, paleta: { type: 'STRING', description: 'marca (padrão: cores do kit da conta) | preto | copa | azul | vinho | personalizada' }, cor_fundo: { type: 'STRING', description: 'só p/ paleta personalizada (hex)' }, cor_destaque: { type: 'STRING', description: 'só p/ paleta personalizada (hex)' }, autoria: { type: 'STRING' } }, required: ['frase'] } },
+    { name: 'gerar_carrossel', description: 'Carrossel (6–8 slides, 3:4) NA IDENTIDADE DA CONTA (cores, @ e logo cadastrados no kit de marca): capa (etiqueta + título ≤8 palavras com UMA palavra em destaque + subtítulo) → problema → 3–5 conteúdo → resumo → CTA. Para transformar um texto pronto do dono, passe-o em texto_base. Retorna URLs + textos. Depois criar_post(formato=carrossel, midias_urls).', parameters: { type: 'OBJECT', properties: { tema: { type: 'STRING' }, texto_base: { type: 'STRING', description: 'texto pronto do dono a transformar em carrossel (mantenha as ideias dele)' }, pilar: { type: 'STRING', description: 'pilar de conteúdo da marca (KM: GESTÃO|NEGÓCIOS|IA|AUTOMAÇÃO; clientes: os pilares deles)' }, objetivo_cta: { type: 'STRING', description: 'salvar|compartilhar|comentar|seguir|conversa' }, qtd_conteudo: { type: 'NUMBER', description: 'slides de conteúdo, 3 a 5 (padrão 3)' }, instrucoes: { type: 'STRING' }, template: { type: 'STRING', description: 'manual (padrão) | km' }, paleta: { type: 'STRING', description: 'marca (padrão: cores do kit da conta) | preto | copa | azul | vinho | personalizada' }, cor_fundo: { type: 'STRING', description: 'só p/ paleta personalizada (hex)' }, cor_destaque: { type: 'STRING', description: 'só p/ paleta personalizada (hex)' } }, required: ['tema', 'pilar'] } },
     { name: 'aplicar_marca', description: 'Aplica a LOGO DA MARCA DA CONTA como marca d\'água numa imagem (URL), escolhendo a versão clara/escura pelo fundo. Só use quando o dono PEDIR marca d\'água/logo na foto.', parameters: { type: 'OBJECT', properties: { url: { type: 'STRING' }, posicao: { type: 'STRING', description: 'inferior-direito (padrão) | inferior-esquerdo | superior-direito | superior-esquerdo' }, assinatura: { type: 'BOOLEAN', description: 'escrever @kauemunchen sob o logo (padrão false — só se o dono pedir)' } }, required: ['url'] } },
     { name: 'ver_marca_visual', description: 'Mostra o kit de marca visual da conta (cores, @, logos cadastradas). Use antes de criar arte se não souber a identidade.', parameters: { type: 'OBJECT', properties: {} } },
     { name: 'definir_marca_visual', description: 'Salva o kit de marca VISUAL da conta usado nas artes (carrossel, frase, story): cores em hex, @ do Instagram, nome, fontes e regras. Use quando o dono passar as cores/identidade ou mandar o manual da marca (extraia as cores HEX do manual). Depois confirme o que salvou.', parameters: { type: 'OBJECT', properties: { nome: { type: 'STRING', description: 'nome da marca como aparece' }, assinatura: { type: 'STRING', description: '@ do Instagram' }, cor_fundo: { type: 'STRING', description: 'hex da cor de fundo das artes (geralmente a cor principal escura)' }, cor_destaque: { type: 'STRING', description: 'hex da cor de destaque (palavra-chave, detalhes)' }, cor_titulo: { type: 'STRING', description: 'hex do texto do título (opcional; automático pelo contraste)' }, cor_apoio: { type: 'STRING', description: 'hex do texto de apoio (opcional)' }, fontes: { type: 'STRING' }, observacoes: { type: 'STRING', description: 'regras do manual em 1–3 linhas (ex.: não distorcer a logo, área de respiro)' } } } },
@@ -35,7 +60,7 @@ export function ferramentas(_conta) {
     { name: 'ler_metricas', description: 'Métricas da conta nos últimos N dias', parameters: { type: 'OBJECT', properties: { dias: { type: 'NUMBER' } } } },
   ];
 }
-export const requerConfirmacao = new Set(['publicar']);
+export const requerConfirmacao = new Set(['publicar', 'remover_midia']);
 
 export async function executar(nome, a, conta, ctx = {}) {
   const cred = db.prepare('SELECT * FROM instagram_auth WHERE conta_id=?').get(conta.id);
@@ -64,12 +89,34 @@ ${a.ajuste ? 'AJUSTE PEDIDO SOBRE A VERSÃO ANTERIOR: ' + a.ajuste : ''}
 MODELO DA LEGENDA: [gancho 1 linha] linha em branco [história/contexto real 2–3 linhas] linha em branco [3 pontos curtos numerados 1. 2. 3.] linha em branco [CTA] linha em branco [5 hashtags].
 REGRAS: gancho nas 3 primeiras palavras (fórmulas: número+contraste, frase que dói, confissão, "e se"); uma ideia por post; números só os das provas de autoridade ou os informados; nunca inventar depoimento; sem venda na fase atual; sem emoji além de um no máximo.
 Responda JSON: {"etiqueta": "${(a.pilar || (kit.usaKM(conta.id) ? 'GESTÃO' : 'CONTEÚDO')).toUpperCase()}", "gancho": "...", "legenda": "texto completo no modelo, sem as hashtags", "hashtags": "#a #b #c #d #e", "cta": "${cta}", "briefing_imagem": "descrição visual curta na identidade visual da marca"${(a.formato === 'carrossel') ? ', "slides": ["capa: título até 8 palavras com UMA palavra em dourado", "problema", "conteúdo 1", "conteúdo 2", "conteúdo 3", "resumo", "cta"]' : ''}}`);
+      if (r) { r.legenda = limparTextoIA(r.legenda); r.hashtags = hashtagsFinal(conta.id, r.hashtags); }
       return r;
     }
+    case 'gerar_pauta': {
+      const id = identidade(conta.id) || {}; const dias = Math.min(14, Math.max(3, a.dias || 7));
+      return gerarJSON(`Você é a MIA, social media de ${id.perfil || quemE(conta)}. Crie uma pauta editorial de ${dias} dias para o Instagram, em português do Brasil.
+IDENTIDADE: ${JSON.stringify({ nicho: id.nicho, categoria: id.categoria, publico: id.publico, tom: id.tom, pilares: id.pilares, descricao: id.descricao })}
+HISTÓRICO APROVADO (não repita temas recentes): ${JSON.stringify(historico(conta.id, 8).map(h => h.tema))}
+${a.foco ? 'FOCO DA SEMANA: ' + a.foco : ''}
+Varie formatos (post, carrossel, frase, story, reels) e pilares. Horário no fuso de Brasília, nos melhores horários do público.
+Responda JSON: {"pauta": [{"dia": "Seg 10/11", "formato": "carrossel", "pilar": "...", "tema": "...", "gancho": "primeira frase do post", "horario": "19:00"}]}`);
+    }
+    case 'gerar_hashtags': {
+      const id = identidade(conta.id) || {};
+      const r = await gerarJSON(`Gere EXATAMENTE 5 hashtags estratégicas em português para um post do Instagram sobre: ${a.tema}. Nicho: ${id.nicho || '—'}. Público: ${id.publico || '—'}. Misture 2 amplas, 2 médias e 1 de nicho. NÃO inclua ${hashtagMarca(conta.id) || 'a hashtag da marca'}. Responda JSON: {"hashtags": "#a #b #c #d #e"}`);
+      return { hashtags: hashtagsFinal(conta.id, r?.hashtags) };
+    }
+    case 'editar_imagem': { const ia = await import('../integracoes/imagem-ia.js'); return { url: await ia.editarImagem({ url: a.url, instrucao: a.instrucao }), instrucao: a.instrucao }; }
+    case 'banner_produto': { const ia = await import('../integracoes/imagem-ia.js'); return { url: await ia.editarImagem({ url: a.url, instrucao: a.cenario, manterProduto: true }), cenario: a.cenario }; }
+    case 'renomear_midia': { const r = db.prepare('UPDATE biblioteca SET nome=? WHERE id=? AND conta_id=?').run(String(a.nome).slice(0, 80), a.id, conta.id); if (!r.changes) throw new Error(`Mídia #${a.id} não encontrada.`); return { ok: true, id: a.id, nome: a.nome }; }
+    case 'remover_midia': { const r = db.prepare('DELETE FROM biblioteca WHERE id=? AND conta_id=?').run(a.id, conta.id); if (!r.changes) throw new Error(`Mídia #${a.id} não encontrada.`); return { ok: true, removida: a.id }; }
+    case 'ver_historico': return db.prepare("SELECT id, formato, tema, publicado_em, data FROM posts WHERE conta_id=? AND status='publicado' ORDER BY id DESC LIMIT ?").all(conta.id, Math.min(30, a.max || 10));
     case 'gerar_midia': {
       const id = identidade(conta.id) || {};
       const prompt = `${a.briefing}. Estilo: ${id.estilo_visual || 'limpo, profissional, alto contraste, sem texto na imagem'}.`;
-      return { url: await ig.gerarImagemFal(prompt, a.ratio || '4:5'), briefing: a.briefing };
+      const ia = await import('../integracoes/imagem-ia.js');
+      const provedor = a.provedor || 'fal';
+      return { url: await ia.gerarImagem({ prompt: prompt + ' No text. No watermarks.', ratio: a.ratio || '4:5', provedor }), briefing: a.briefing, provedor, disponiveis: ia.provedoresDisponiveis().map(p => p.id) };
     }
     case 'listar_paletas': return render.paletas();
     case 'ver_marca_visual': return kit.usaKM(conta.id) ? { identidade: 'KM (padrão do manual KM)' } : (kit.lerKit(conta.id) || { aviso: 'Nenhum kit de marca visual cadastrado. Peça cores (hex), @ e logos — ou o manual da marca.' });
@@ -86,7 +133,7 @@ Responda JSON: {"etiqueta": "${(a.pilar || (kit.usaKM(conta.id) ? 'GESTÃO' : 'C
       return { url, ...info };
     }
     case 'gerar_frase': {
-      const bytes = await render.frase(a.frase, { template: a.template || 'manual', paleta: a.paleta || 'km', autoria: a.autoria, palavra_dourada: a.palavra_dourada, etiqueta: a.pilar, contaId: conta.id });
+      const bytes = await render.frase(limparTextoIA(a.frase), { template: a.template || 'manual', paleta: a.paleta || 'km', cores: a.cor_fundo ? { fundo: a.cor_fundo, destaque: a.cor_destaque } : undefined, autoria: a.autoria, palavra_dourada: a.palavra_dourada, etiqueta: a.pilar, contaId: conta.id });
       const url = await cdn.upload(bytes, { pasta: `assessor/${conta.id}/frases` });
       return { url, frase: a.frase, palavra_dourada: a.palavra_dourada, template: a.template || 'manual' };
     }
@@ -111,7 +158,7 @@ REGRAS: título da capa com até 8 palavras e UMA palavra-chave para destacar em
 Responda JSON: {"etiqueta": "${(a.pilar || (km ? 'GESTÃO' : 'CONTEÚDO')).toUpperCase()}", "titulo": "...", "palavra_dourada": "...", "subtitulo": "...", "slides": [{"tipo": "problema", "titulo": "...", "texto": "..."}, {"tipo": "conteudo", "titulo": "...", "palavra_dourada": "...", "texto": "..."}, {"tipo": "resumo", "titulo": "...", "texto": "..."}], "cta": "${cta}"}`);
       }
       if (!dados?.slides?.length) throw new Error('IA não devolveu slides válidos; tente de novo.');
-      const slides = await render.carrossel(dados, { template, paleta: a.paleta || 'km', contaId: conta.id });
+      const slides = await render.carrossel(dados, { template, paleta: a.paleta || 'km', cores: a.cor_fundo ? { fundo: a.cor_fundo, destaque: a.cor_destaque } : undefined, contaId: conta.id });
       const base = Date.now();
       const urls = await Promise.all(slides.map((b, i) => cdn.upload(b, { pasta: `assessor/${conta.id}/carrossel`, nome: `car_${base}_${i}` })));
       return { urls, textos: dados, template };
@@ -125,6 +172,9 @@ Responda JSON: {"etiqueta": "${(a.pilar || (km ? 'GESTÃO' : 'CONTEÚDO')).toUpp
     }
     case 'listar_biblioteca': return listarBiblioteca(conta.id, { tipo: a.tipo, max: a.max || 15 });
     case 'criar_post': {
+      if (a.legenda) a.legenda = limparTextoIA(a.legenda);
+      if (a.hashtags || hashtagMarca(conta.id)) a.hashtags = hashtagsFinal(conta.id, a.hashtags) || null;
+      if ((a.formato || '') === 'story') a.hashtags = null;
       const status = a.data ? 'agendado' : 'rascunho';
       if (a.midias_urls?.length) { const m = []; for (const u of a.midias_urls) m.push(await garantirMarca(conta.id, u)); a.midias_urls = m; }
       if (a.midia_url) a.midia_url = await garantirMarca(conta.id, a.midia_url);
@@ -156,6 +206,8 @@ Responda JSON: {"etiqueta": "${(a.pilar || (km ? 'GESTÃO' : 'CONTEÚDO')).toUpp
       if (!p) throw new Error(`Post #${a.post_id} não existe.`);
       if (a.midias_urls?.length) { const m = []; for (const u of a.midias_urls) m.push(await garantirMarca(conta.id, u)); a.midias_urls = m; }
       if (a.midia_url) a.midia_url = await garantirMarca(conta.id, a.midia_url);
+      if (a.legenda) a.legenda = limparTextoIA(a.legenda);
+      if (a.hashtags) a.hashtags = hashtagsFinal(conta.id, a.hashtags);
       const campos = { legenda: a.legenda, hashtags: a.hashtags, tema: a.tema, pilar: a.pilar, formato: a.formato, midia_url: a.midias_urls?.length ? JSON.stringify(a.midias_urls) : a.midia_url };
       for (const [k, v] of Object.entries(campos)) if (v !== undefined && v !== null) db.prepare(`UPDATE posts SET ${k}=? WHERE id=?`).run(v, p.id);
       return { id: p.id, atualizado: Object.keys(campos).filter(k => campos[k] != null) };

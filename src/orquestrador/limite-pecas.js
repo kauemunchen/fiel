@@ -10,8 +10,10 @@ export const CUSTO_PECA = {
   gerar_midia: TARIFAS.fal_imagem,
   aplicar_marca: TARIFAS.render_imagem,
   remover_audio: TARIFAS.video_audio + TARIFAS.video_edicao,
+  editar_imagem: TARIFAS.ia_edicao_imagem,
+  banner_produto: TARIFAS.ia_edicao_imagem,
 };
-const NOME = { gerar_carrossel: 'carrossel', gerar_frase: 'arte de frase', gerar_midia: 'imagem com IA', aplicar_marca: 'marca d\'água', remover_audio: 'vídeo sem áudio' };
+const NOME = { editar_imagem: 'retoque de imagem', banner_produto: 'banner de produto', gerar_carrossel: 'carrossel', gerar_frase: 'arte de frase', gerar_midia: 'imagem com IA', aplicar_marca: 'marca d\'água', remover_audio: 'vídeo sem áudio' };
 const RASCUNHO = new Set(['criar_post']);
 
 const NUM = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, 'três': 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10 };

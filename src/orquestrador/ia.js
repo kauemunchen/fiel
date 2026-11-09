@@ -176,6 +176,7 @@ export function descreverAcao(c) {
     case 'publicar': return `publicar o post #${a.post_id || ''} no Instagram`;
     case 'criar_cobranca': return `criar cobrança de ${a.valor || ''} para ${a.cliente || ''}`;
     case 'encerrar_vigencia': return `encerrar a vigência #${a.vigencia_id}${a.nova_data ? ` e registrar nova até ${a.nova_data}` : ''}`;
+    case 'remover_midia': return `remover a mídia #${a.id} da biblioteca (não volta)`;
     default: return `${c.name} ${JSON.stringify(a).slice(0, 120)}`;
   }
 }

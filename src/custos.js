@@ -14,6 +14,8 @@ export const PRECOS_PADRAO = {
   'gemini-1.5-pro_in': 1.25,   'gemini-1.5-pro_out': 5.00,   // ≤128k. Acima: 2.50 / 10.00
   // Fal.ai (USD por imagem) — flux/schnell que a MIA usa fica em torno de US$ 0,003
   'fal_imagem_usd': 0.003,
+  // Imagen 4 / OpenAI gpt-image e edição (Gemini Flash Image / FLUX Kontext) — ~US$ 0,04 por imagem
+  'ia_imagem_usd': 0.04, 'ia_edicao_imagem_usd': 0.04,
   // Mercado Pago (fração do valor + taxa fixa em R$) — ajuste pelo SEU plano MP
   'mp_pix_pct': 0.0099, 'mp_pix_fixo': 0,
   'mp_cartao_pct': 0.0499, 'mp_cartao_fixo': 0.40,  // crédito liberação imediata; parcelado 4,98%+0,40 à vista
@@ -86,6 +88,9 @@ export function custoIAPorConta() {
       SELECT conta_id, COUNT(*) n, SUM(CASE WHEN criado_em >= datetime('now','-30 days') THEN 1 ELSE 0 END) n30 FROM creditos_mov WHERE motivo='fal imagem' AND criado_em < ? GROUP BY conta_id
     ) GROUP BY conta_id`).all(desde);
   for (const r of fal) { add(r.conta_id, 'fal_brl', (r.n || 0) * falUsd * cambio, (r.n30 || 0) * falUsd * cambio); out[r.conta_id].imagens += r.n || 0; }
+  // imagens Imagen/OpenAI e edições entram no mesmo balde de imagens
+  const extras = db.prepare(`SELECT conta_id, tipo, SUM(qtd) n, SUM(CASE WHEN criado_em >= datetime('now','-30 days') THEN qtd ELSE 0 END) n30 FROM uso_extra WHERE tipo IN ('ia_imagem','ia_edicao_imagem') GROUP BY conta_id, tipo`).all();
+  for (const r of extras) { const usd = p[r.tipo + '_usd'] ?? 0.04; add(r.conta_id, 'fal_brl', (r.n || 0) * usd * cambio, (r.n30 || 0) * usd * cambio); out[r.conta_id].imagens += r.n || 0; }
   for (const o of Object.values(out)) for (const k of ['total_brl', 'ia_brl', 'fal_brl', 'd30_brl']) o[k] = +o[k].toFixed(2);
   return out;
 }

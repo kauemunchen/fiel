@@ -7,8 +7,23 @@ async function post(path, body, json = true) {
   return Buffer.from(await r.arrayBuffer());
 }
 export const paletas = () => fetch(BASE + '/paletas').then(r => r.json());
-export async function frase(texto, { paleta = 'km', autoria, template = 'manual', palavra_dourada, etiqueta, contaId } = {}) {
-  const marca = await marcaDe(contaId);
+// Paletas do bot KM (escolha opcional; padrão = cores da marca da conta). 'personalizada' usa as cores informadas.
+export const PALETAS = {
+  preto: { nome: 'Preto Premium', fundo: '#000000', destaque: '#C8A96E', titulo: '#FFFFFF' },
+  copa: { nome: 'Copa Brasil', fundo: '#1A3A1A', destaque: '#009C3B', titulo: '#FFFFFF' },
+  azul: { nome: 'Azul Corporativo', fundo: '#1A2A4A', destaque: '#4A90D9', titulo: '#FFFFFF' },
+  vinho: { nome: 'Vinho', fundo: '#3A1A1A', destaque: '#C8A96E', titulo: '#FFFFFF' },
+};
+/** Marca da conta com a paleta escolhida por cima (mantém logo e @). */
+async function marcaComPaleta(contaId, paleta, cores) {
+  const base = await marcaDe(contaId);
+  const preset = PALETAS[paleta] || (paleta === 'personalizada' && cores?.fundo ? cores : null);
+  if (!preset) return base;
+  const { nome, ...c } = preset;
+  return { ...(base || { km: true }), cores: { ...(base?.cores || {}), ...c } };
+}
+export async function frase(texto, { paleta = 'km', cores, autoria, template = 'manual', palavra_dourada, etiqueta, contaId } = {}) {
+  const marca = await marcaComPaleta(contaId, paleta, cores);
   return post('/frase', { frase: texto, paleta, autoria: autoria ?? (marca ? undefined : '@kauemunchen'), template: marca ? 'manual' : template, palavra_dourada, etiqueta, marca });
 }
 export const letreiro = (gancho) => post('/letreiro', { gancho });
@@ -31,9 +46,9 @@ export async function marcaDagua(bytes, { posicao = 'inferior-direito', proporca
 export const comLogo = (bytes) => post('/logo', bytes, false);
 /** Logo enviada pelo cliente: tem transparência? é clara ou escura? → sugestão de variante (claro = para fundo escuro). */
 export async function analisarLogo(bytes) { const r = await fetch(BASE + '/logo/analisar', { method: 'POST', body: bytes }); if (!r.ok) throw new Error('analisar logo falhou'); return r.json(); }
-export async function carrossel(dados, { paleta = 'km', template = 'manual', contaId } = {}) {
+export async function carrossel(dados, { paleta = 'km', cores, template = 'manual', contaId } = {}) {
   cobra('render_carrossel');
-  const marca = await marcaDe(contaId);
+  const marca = await marcaComPaleta(contaId, paleta, cores);
   const zip = await post('/carrossel', { dados, paleta, template: marca ? 'manual' : template, marca });
   return extrairZip(zip);
 }

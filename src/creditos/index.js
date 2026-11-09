@@ -36,6 +36,8 @@ export const TARIFAS = {
   video_edicao: 5,       // corte, faixa, legenda, logo (ffmpeg)
   video_audio: 1,        // extrair/remover áudio
   fal_imagem: 4,         // imagem gerada por IA (fal.ai)
+  ia_imagem: 4,          // imagem gerada por IA (Imagen / OpenAI)
+  ia_edicao_imagem: 5,   // retoque por instrução / banner de produto
   transcricao_min: 0.5,  // por minuto de áudio transcrito (além dos tokens)
 };
 export const PACOTES_PADRAO = [
