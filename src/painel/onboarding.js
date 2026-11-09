@@ -49,7 +49,7 @@
 
     google: () => ({ titulo: 'Conectar o Google', sub: 'Agenda, envio de e-mails, Drive, planilhas e tarefas para a Olga e o Estag.', html: E.google.conectado ? '<div class="onb-ok">✅ Google conectado</div>' : `
       <button type="button" class="btn ouro onb-grande" id="oGoogle">Conectar com o Google</button>
-      <p class="onb-dica">Abre uma janela do Google. Escolha sua conta e toque em <b>Continuar</b>. O Fiel só mexe nos arquivos que ele mesmo criar ou que você liberar.</p>
+      <p class="onb-dica">Abre uma janela do Google. Escolha sua conta, marque as permissões e toque em <b>Continuar</b>. Se aparecer <b>"O Google não verificou este app"</b>, toque em <b>Avançado → Acessar usefiel.com</b> (a verificação está em andamento). O Fiel só mexe nos arquivos que ele mesmo criar ou que você liberar.</p>
       <div class="onb-espera oculto" id="oGEspera">Aguardando a autorização…</div>`,
       montar: () => { const b = $o('#oGoogle'); if (!b) return; b.onclick = () => { const w = window.open(E.google.url, 'fielGoogle', 'width=520,height=680'); if (!w) location.href = E.google.url; $o('#oGEspera').classList.remove('oculto'); vigiar(() => E.google.conectado, '#oGEspera', '✅ Google conectado'); }; } }),
 
@@ -87,7 +87,7 @@
     clearInterval(poll);
     poll = setInterval(async () => { try { E = await chamar('/api/onboarding'); if (cond()) { clearInterval(poll); const el = $o(sel); if (el) { el.textContent = txtOk; el.classList.add('onb-ok'); } setTimeout(() => avancar(), 900); } } catch {} }, 2500);
   }
-  window.addEventListener('message', (ev) => { if (ev.data === 'fiel:google-ok' && $o('#onb')) chamar('/api/onboarding').then(e => { E = e; desenhar(); }); });
+  window.addEventListener('message', (ev) => { if (ev.data === 'fiel:google-erro' && $o('#oGEspera')) { clearInterval(poll); $o('#oGEspera').textContent = '⚠️ O Google não autorizou. Toque em Conectar de novo ou em Depois.'; } if (ev.data === 'fiel:google-ok' && $o('#onb')) chamar('/api/onboarding').then(e => { E = e; desenhar(); }); });
 
   function desenhar() {
     const lista = etapas(); i = Math.min(i, lista.length - 1); const id = lista[i]; const t = TELAS[id]();
