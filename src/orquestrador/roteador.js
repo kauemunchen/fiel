@@ -29,7 +29,7 @@ export async function tratarMensagem(msg, canal) {
   if (usuario && usuario.papel !== 'dono') return fluxoColaborador(msg, conta, usuario);
   // Imagens sem pedido: resposta aos botões "usar em post / são logos / só guardar" (sem IA)
   { const imgs = await import('./imagens-social.js'); const b = imgs.tratarBotao(conta, msg);
-    if (b?.resposta) return b.resposta; if (b?.msg) Object.assign(msg, b.msg);
+    if (b?.resposta) return { texto: b.resposta, modulo: 'social' }; if (b?.msg) Object.assign(msg, b.msg);
     else if (msg.tipo === 'texto' && msg.texto && !msg.texto.startsWith('[')) { const ctx = imgs.contextoPendente(conta.id); if (ctx) msg.texto += ctx; } }
   // Créditos: sem saldo, só comandos livres (status, créditos, sim/não, login web…)
   const cred = await import('../creditos/index.js');
@@ -70,6 +70,22 @@ export async function tratarMensagem(msg, canal) {
         msg.texto = (msg.texto ? msg.texto + '\n' : '') + `[Vídeo enviado pelo dono, já hospedado: ${v.url} (${Math.round(v.duracao || 0)} s, ${v.largura}x${v.altura}${v.avisos.length ? '; atenção: ' + v.avisos.join('; ') : ''}). Use como midia_url. PRIMEIRO pergunte, em uma linha, o que faltar: manter ou retirar o áudio (padrão da conta: ${(await import('../canal/api-marca.js')).ajuste(conta.id, 'video_sem_audio_padrao', true) ? 'retirar' : 'manter'})? Reels (com legenda) ou Story? quando? E ofereça: "quer editar (texto na tela, legenda, corte)? diga 'editar'". Se o dono pedir edição/texto/legenda queimada, responda só: "Diga 'MIA, editar esse vídeo' que eu abro o modo edição com ele."  Quando ele responder "sem áudio/retirar", chame remover_audio(url) e use a URL devolvida. Depois salve com criar_post (formato reels|story) com a data e confirme. Não gere imagem nem marca d'água para vídeo (o sistema aplica o logo sozinho).]`;
       } catch (e) { msg.texto = (msg.texto ? msg.texto + '\n' : '') + `[vídeo recebido, mas não consegui hospedar: ${e.message}]`; }
       msg.forcarModulo = 'social';
+    }
+  }
+  if (msg.tipo === 'imagem' || msg.tipo === 'arquivo') {
+    // MANUAL DA MARCA (PDF ou imagem com legenda/nome "manual", "identidade visual", "paleta"…): a MIA lê e grava no kit de marca
+    const mm = await import('../integracoes/manual-marca.js');
+    if (ativosAgora.includes('social') && mm.ehManual({ legenda: msg.texto || '', nome: String(msg.midia?.nome || '').toLowerCase(), mime: msg.midia?.mime || '' })) {
+      let bytesM; const midiaM = { ...msg.midia };
+      try { bytesM = await canal.baixarMidia(msg.midia.ref); } catch (e) { return `Não consegui baixar o manual (${e.message}). Tente enviar de novo.`; }
+      await canal.enviar(msg.conta, msg.chatId, { texto: '🎨 Lendo o manual da marca (cores, fontes e regras)…', modulo: 'social' });
+      try {
+        const r = await mm.lerManual(conta.id, Buffer.from(bytesM), msg.midia.mime);
+        msg.texto = (msg.texto ? msg.texto + '\n' : '') + mm.contextoParaMIA(r, msg.midia?.nome || '');
+      } catch (e) { msg.texto = (msg.texto ? msg.texto + '\n' : '') + `[O dono enviou o manual da marca, mas a leitura falhou. Erro real: ${e.message}. Diga isso em 2 linhas e peça um print da página de cores ou os HEX. Não invente cores.]`; }
+      // cópia no Drive pela Estag, em segundo plano e sem mensagem extra (se a Estag estiver ligada)
+      if (ativosAgora.includes('documentos')) import('../ferramentas/documentos.js').then(d => d.receberArquivo(conta, { bytes: bytesM, mime: midiaM.mime, nome: midiaM.nome || 'manual-da-marca.pdf' })).catch(e => console.error('[manual] arquivar', e.message));
+      msg.tipo = 'texto'; msg.midia = null; msg.forcarModulo = 'social';
     }
   }
   if (msg.tipo === 'imagem' || msg.tipo === 'arquivo') {
@@ -114,6 +130,11 @@ export async function tratarMensagem(msg, canal) {
         if (doc.duplicado) msg.texto = (msg.texto ? msg.texto + '\n' : '') + `[DUPLICADO — NÃO arquivei de novo: ${doc.motivo}. Original: ${JSON.stringify(doc.documento_original)}. Diga em 2 linhas que esse documento já estava guardado (título, pasta, link do original) e que não criei cópia.]`;
         else msg.texto = (msg.texto ? msg.texto + '\n' : '') + `[Documento recebido do dono e JÁ ARQUIVADO no Drive. Dados: ${JSON.stringify(doc)}. Confirme em até 3 linhas: o que é, onde guardou (pasta) e o link; se houver vigência, diga a data e que os avisos estão agendados; se "legivel" for false, peça uma foto melhor ou que ele descreva o documento; se faltar empresa/tipo óbvios, pergunte. Não invente dados.]`;
         msg.forcarModulo = 'documentos';
+        // a Estag identificou um manual de marca (sem legenda): a MIA também lê e grava cores/fontes no kit
+        if (ativosAgora.includes('social') && !doc.duplicado && /\b(manual|brand ?book|identidade visual|guia de marca|paleta)\b/i.test(`${doc.titulo || ''} ${doc.resumo || ''}`)) {
+          try { const mm = await import('../integracoes/manual-marca.js'); const r = await mm.lerManual(conta.id, Buffer.from(bytes), msg.midia.mime);
+            msg.texto += '\n' + mm.contextoParaMIA(r, msg.midia?.nome || '').replace('Confirme ao dono em até 6 linhas', 'Depois de dizer onde arquivou, confirme em até 5 linhas'); msg.forcarModulo = 'social'; } catch (e) { console.error('[manual] via estag', e.message); }
+        }
       } catch (e) { msg.texto = (msg.texto ? msg.texto + '\n' : '') + `[Documento recebido mas NÃO arquivado. Erro real: ${e.message}. Repita o erro ao dono e diga o que ele precisa fazer.]`; msg.forcarModulo = 'documentos'; }
     } else if (destino === 'financeiro') {
       await canal.enviar(msg.conta, msg.chatId, '🧾 Tina lendo o documento financeiro…');

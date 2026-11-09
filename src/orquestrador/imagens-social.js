@@ -46,7 +46,7 @@ export async function coletar({ conta, msg, canal, bytes, processar }) {
 async function fechar(contaId) {
   const c = coletas.get(contaId); coletas.delete(contaId); if (!c?.itens.length) return;
   const legenda = c.itens.map(i => i.legenda).find(t => t.trim()) || '';
-  const enviar = (r) => c.canal.enviar(null, c.chatId, r);
+  const enviar = (r) => c.canal.enviar(null, c.chatId, typeof r === 'string' ? { texto: r, modulo: 'social' } : { modulo: 'social', ...r });
   // 1) logos
   if (LOGO_RX.test(legenda) || c.itens.every(i => i.logo)) {
     ultimoLogo.set(contaId, Date.now());

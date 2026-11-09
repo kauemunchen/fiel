@@ -3,7 +3,7 @@ const $ = (s) => document.querySelector(s);
 const tokenLocal = () => new URLSearchParams(location.search).get('token') || localStorage.getItem('akm');
 const api = async (p, o = {}) => { const tk = tokenLocal(); const r = await fetch(p, { credentials: 'same-origin', ...o, headers: { ...(o.headers || {}), ...(tk ? { authorization: 'Bearer ' + tk } : {}) } }); if (r.status === 401) { mostrarLogin(); throw new Error('401'); } return r.json(); };
 const NOMES = { diretor: 'Diretor', secretaria: 'Secretária', documentos: 'Documentos', financeiro: 'Financeiro', producao: 'Produção', social: 'MIA' };
-let me = null, ws = null, filtro = null, maisAntigo = null, anexo = null, rec = null;
+let me = null, ws = null, filtro = null, maisAntigo = null, rec = null;
 
 // ---------- login ----------
 async function mostrarLogin() {
@@ -158,30 +158,70 @@ function conectar() {
 }
 
 // ---------- composer ----------
-async function enviar(texto, arquivo) {
-  if (!texto && !arquivo) return;
-  const fd = new FormData(); if (texto) fd.append('texto', texto); if (arquivo) fd.append('arquivo', arquivo, arquivo.name || 'audio.webm');
-  await api('/api/enviar', { method: 'POST', body: fd });
+// Envio com progresso (XHR): o dono vê "enviando 45%" e, se falhar, o erro e um botão para tentar de novo.
+function enviarXHR(fd, aoProgresso) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest(); x.open('POST', '/api/enviar'); const tk = tokenLocal(); if (tk) x.setRequestHeader('authorization', 'Bearer ' + tk);
+    x.timeout = 10 * 60000;
+    x.upload.onprogress = (e) => { if (e.lengthComputable && aoProgresso) aoProgresso(Math.round(e.loaded / e.total * 100)); };
+    x.onload = () => { if (x.status === 401) { mostrarLogin(); return reject(new Error('sessão expirada')); } let j = {}; try { j = JSON.parse(x.responseText); } catch {} if (x.status >= 400 || j.erro) return reject(new Error(j.erro || (x.status === 413 ? 'arquivo grande demais' : 'erro ' + x.status))); resolve(j); };
+    x.onerror = () => reject(new Error('falha de conexão')); x.ontimeout = () => reject(new Error('o envio demorou demais'));
+    x.send(fd);
+  });
 }
+function avisoEnvio(nome) {
+  const el = document.createElement('div'); el.className = 'envio-status'; $('#lista').appendChild(el); $('#lista').scrollTop = $('#lista').scrollHeight;
+  return {
+    progresso(p) { el.textContent = `📎 Enviando ${nome}… ${p}%`; },
+    ok() { el.remove(); },
+    erro(msg, tentar) { el.classList.add('erro'); el.innerHTML = `⚠️ Não consegui enviar <b>${esc(nome)}</b> (${esc(msg)}). <button type="button">Tentar de novo</button>`; el.querySelector('button').onclick = () => { el.remove(); tentar(); }; },
+  };
+}
+async function enviar(texto, arquivo, extra = {}) {
+  if (!texto && !arquivo) return;
+  const fd = new FormData(); if (texto) fd.append('texto', texto); for (const [k, v] of Object.entries(extra)) fd.append(k, v);
+  if (!arquivo) return api('/api/enviar', { method: 'POST', body: fd });
+  fd.append('arquivo', arquivo, arquivo.name || 'audio.webm');
+  const nome = arquivo.name || 'áudio'; const av = avisoEnvio(nome); av.progresso(0);
+  try { await enviarXHR(fd, (p) => av.progresso(p)); av.ok(); return true; }
+  catch (e) { av.erro(e.message, () => enviar(texto, arquivo, extra)); return false; }
+}
+const MAX_ANEXOS = 10, MAX_MB = 50;
+let anexos = [];
 $('#form').onsubmit = async (e) => {
-  e.preventDefault(); const t = $('#texto').value.trim(); const a = anexo; if (!t && !a) return;
+  e.preventDefault(); const t = $('#texto').value.trim(); const lista = anexos.slice(); if (!t && !lista.length) return;
   $('#texto').value = ''; $('#texto').style.height = 'auto'; limparAnexo();
-  await enviar(t, a);
+  if (!lista.length) return enviar(t);
+  // vários arquivos: um envio por vez (fila), todos no mesmo "grupo" — fotos viram álbum; o texto vai junto do primeiro
+  const grupo = lista.length > 1 ? 'g' + Date.now().toString(36) : '';
+  for (let i = 0; i < lista.length; i++) await enviar(i === 0 ? t : '', lista[i], grupo ? { grupo } : {});
 };
 $('#texto').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#form').requestSubmit(); } });
-$('#texto').addEventListener('input', function () { this.style.height = 'auto'; this.style.height = Math.min(160, this.scrollHeight) + 'px'; });
+function ajustarAltura(el) { el.style.height = 'auto'; const max = Math.min(280, Math.round(innerHeight * 0.4)); el.style.height = Math.min(max, el.scrollHeight + 2) + 'px'; el.classList.toggle('multilinha', el.scrollHeight > 48); }
+$('#texto').addEventListener('input', function () { ajustarAltura(this); });
 $('#anexar').onclick = () => $('#arquivo').click();
-$('#arquivo').onchange = () => { const f = $('#arquivo').files[0]; if (f) mostrarAnexo(f); $('#arquivo').value = ''; };
-function mostrarAnexo(f) {
-  anexo = f; const p = $('#previaAnexo'); p.classList.remove('oculto');
-  const url = URL.createObjectURL(f); const tag = f.type.startsWith('image/') ? `<img src="${url}">` : f.type.startsWith('video/') ? `<video src="${url}" muted></video>` : '📄';
-  p.innerHTML = `${tag}<span>${esc(f.name)} · ${(f.size / 1048576).toFixed(1)} MB</span><button class="icone" id="tirarAnexo">✕</button>`;
-  $('#tirarAnexo').onclick = limparAnexo; $('#texto').focus();
+$('#arquivo').onchange = () => { adicionarAnexos($('#arquivo').files); $('#arquivo').value = ''; };
+function adicionarAnexos(files) {
+  const novos = [...(files || [])]; if (!novos.length) return;
+  const grandes = novos.filter(f => f.size > MAX_MB * 1048576);
+  if (grandes.length) alert(`${grandes.map(f => f.name).join(', ')}: acima de ${MAX_MB} MB. Suba no Google Drive e mande o link aqui.`);
+  anexos = [...anexos, ...novos.filter(f => f.size <= MAX_MB * 1048576)];
+  if (anexos.length > MAX_ANEXOS) { alert(`Envio até ${MAX_ANEXOS} arquivos por vez — fiquei com os ${MAX_ANEXOS} primeiros.`); anexos = anexos.slice(0, MAX_ANEXOS); }
+  desenharAnexos(); $('#texto').focus();
 }
-function limparAnexo() { anexo = null; $('#previaAnexo').classList.add('oculto'); $('#previaAnexo').innerHTML = ''; }
-document.addEventListener('paste', (e) => { const f = [...(e.clipboardData?.files || [])][0]; if (f) mostrarAnexo(f); });
+function mostrarAnexo(f) { adicionarAnexos([f]); }
+function desenharAnexos() {
+  const p = $('#previaAnexo'); if (!anexos.length) { p.classList.add('oculto'); p.innerHTML = ''; return; }
+  p.classList.remove('oculto');
+  p.innerHTML = anexos.map((f, i) => { const url = URL.createObjectURL(f); const tag = f.type.startsWith('image/') ? `<img src="${url}">` : f.type.startsWith('video/') ? `<video src="${url}" muted></video>` : '<span class="ico-arq">📄</span>';
+    return `<div class="anexo-item">${tag}<span>${esc(f.name)} · ${(f.size / 1048576).toFixed(1)} MB</span><button type="button" class="icone" data-i="${i}" title="Tirar">✕</button></div>`; }).join('')
+    + (anexos.length > 1 ? `<div class="anexo-total">${anexos.length} arquivos — vão um por vez</div>` : '');
+  p.querySelectorAll('button[data-i]').forEach(b => b.onclick = () => { anexos.splice(Number(b.dataset.i), 1); desenharAnexos(); });
+}
+function limparAnexo() { anexos = []; desenharAnexos(); }
+document.addEventListener('paste', (e) => { const fs = e.clipboardData?.files; if (fs?.length) adicionarAnexos(fs); });
 document.addEventListener('dragover', (e) => e.preventDefault());
-document.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) mostrarAnexo(f); });
+document.addEventListener('drop', (e) => { e.preventDefault(); adicionarAnexos(e.dataTransfer?.files); });
 
 // gravação de áudio (MediaRecorder) → envia como áudio (o bot transcreve)
 $('#gravar').onclick = async () => {

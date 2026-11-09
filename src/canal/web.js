@@ -212,10 +212,12 @@ export class WebCanal {
     });
     // enviar texto / upload (multipart simples: campo 'arquivo' + 'texto')
     app.post('/api/enviar', auth, async (req, res) => {
-      const ct = req.headers['content-type'] || ''; let texto = '', midia = null, tipo = 'texto';
+      const ct = req.headers['content-type'] || ''; let texto = '', midia = null, tipo = 'texto', grupo = null;
+      if (Number(req.headers['content-length'] || 0) > 60 * 1048576) return res.status(413).json({ erro: 'arquivo acima de 50 MB — suba no Google Drive e mande o link' });
       if (ct.startsWith('multipart/')) {
-        const { campos, arquivo } = await lerMultipart(req);
-        texto = campos.texto || '';
+        let campos, arquivo;
+        try { ({ campos, arquivo } = await lerMultipart(req)); } catch (e) { console.error('[web] upload', e.message); return res.status(400).json({ erro: 'o arquivo não chegou inteiro, tente de novo' }); }
+        texto = campos.texto || ''; grupo = /^[\w-]{1,40}$/.test(campos.grupo || '') ? `web-${req.sessao.conta_id}-${campos.grupo}` : null;
         if (arquivo) {
           const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${path.extname(arquivo.nome || '') || ''}`;
           fs.writeFileSync(path.join(UPLOADS, id), arquivo.bytes);
@@ -226,7 +228,7 @@ export class WebCanal {
       } else { texto = String(req.body?.texto || ''); }
       if (!texto && !midia) return res.status(400).json({ erro: 'vazio' });
       res.json({ ok: true });
-      this.fn({ conta: null, chatId: req.sessao.chat_id, remetente: req.sessao.chat_id, tipo, texto, midia, recebidoEm: new Date(), origem: 'web' }).catch(e => console.error('[web] enviar', e.message));
+      this.fn({ conta: null, chatId: req.sessao.chat_id, remetente: req.sessao.chat_id, tipo, texto, midia, grupo, recebidoEm: new Date(), origem: 'web' }).catch(e => console.error('[web] enviar', e.message));
     });
     app.get('/api/upload/:id', auth, (req, res) => { const p = path.join(UPLOADS, path.basename(req.params.id)); if (!fs.existsSync(p)) return res.sendStatus(404); res.sendFile(p); });
   }
