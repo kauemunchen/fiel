@@ -1,0 +1,27 @@
+# Utilitário (manual): envia arquivos do ramo temporário 'envio' para URLs de upload assinadas (fal.media).
+name: enviar-midia
+on:
+  workflow_dispatch:
+    inputs:
+      itens:
+        description: "pares arquivo|url_assinada separados por espaço"
+        required: true
+permissions:
+  contents: read
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: envio
+      - name: Enviar
+        env:
+          ITENS: ${{ inputs.itens }}
+        run: |
+          for p in $ITENS; do
+            f="${p%%|*}"; u="${p#*|}"
+            case "$u" in https://*.fal.media/*) ;; *) echo "ignorado: $f"; continue;; esac
+            ct=application/octet-stream; case "$f" in *.mp3) ct=audio/mpeg;; *.wav) ct=audio/wav;; *.mp4) ct=video/mp4;; *.png) ct=image/png;; esac
+            curl -sSf -X PUT -H "Content-Type: $ct" --upload-file "$f" "$u" -o /dev/null && echo "ok $f"
+          done
