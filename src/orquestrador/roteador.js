@@ -240,7 +240,14 @@ export async function tratarMensagem(msg, canal) {
   let textoClass = msg.texto;
   const voc = msg.texto.match(/^([A-Za-zÀ-ÿ]{2,20})[,:]\s+/);
   if (!modulo && voc) textoClass = msg.texto.slice(voc[0].length);
-  if (!modulo) modulo = await classificar(textoClass, ativos);
+  if (!modulo) {
+    modulo = await classificar(textoClass, ativos);
+    // Conversa em andamento com um assessor (até 30 min): resposta que o classificador mandaria ao Diretor fica com quem estava conversando
+    // (ex.: MIA perguntou "o que quer mudar na imagem?" e o dono responde "somos uma facção, quero mais ligado à costura")
+    const ult = memoria.ultimoModulo(conta.id);
+    if (modulo === 'diretor' && ult && ult.modulo !== 'diretor' && ativos.includes(ult.modulo) && (Date.now() - new Date(ult.criado_em + 'Z').getTime()) < 30 * 60000
+      && !/\b(alfred|diretor|prioridade|resumo|semana|m[eê]s|meta|estrat[eé]gia|equipe|todos os|vis[aã]o geral)\b/i.test(textoClass)) modulo = ult.modulo;
+  }
   console.log(`[msg] ${msg.chatId} → ${modulo}: ${msg.texto.slice(0, 80)}`); contextoUso.modulo = modulo;
   const prompt = montarPrompt({ modulo, conta, ativos, texto: msg.texto });
   // Pedidos pesados (carrossel, arte, imagem): avisa na hora e deixa demorar
@@ -250,8 +257,8 @@ export async function tratarMensagem(msg, canal) {
   let resposta = await responder({ prompt, conta, modulo, msg, ativos });
   if (resposta && typeof resposta === 'object' && resposta.botoes && !resposta.foto && !resposta.video && !resposta.fotos) { /* confirmação com botões: passa direto */ await memoria.registrarInteracao(conta.id, modulo, msg, resposta.texto); return resposta; }
   await memoria.registrarInteracao(conta.id, modulo, msg, resposta);
-  // Social: se a resposta contém URL de imagem (fal/cloudinary), manda como foto com a legenda
-  if (modulo === 'social' && typeof resposta === 'string') {
+  // Resposta com URL de imagem/vídeo hospedado (fal/cloudinary) sai como mídia, nunca como link — vale para qualquer assessor (o Diretor também gera)
+  if (typeof resposta === 'string' && (/https?:\/\/(?:[\w.-]*fal\.media|res\.cloudinary\.com)\//i.test(resposta) || (modulo === 'social' && /https?:\/\/\S+\.(?:jpg|jpeg|png|webp)/i.test(resposta)))) {
     const todas = [...resposta.matchAll(/https?:\/\/res\.cloudinary\.com\/\S+?\.(?:jpg|jpeg|png|webp)/gi)].map(x => x[0]);
     if (todas.length > 1) { const txt = todas.reduce((t, u) => t.replace(u, ''), resposta).replace(/^\s*[-•]\s*[^\n:]{0,30}:\s*$/gm, '').replace(/^\s*Pr[ée]via[^\n]*:\s*$/gmi, '').replace(/\n{3,}/g, '\n\n').trim(); return { fotos: [...new Set(todas)], texto: txt }; }
     const m = resposta.match(/https?:\/\/\S+\.(?:jpg|jpeg|png|webp)(?:\?\S*)?|https?:\/\/(?:[\w.-]*fal\.media|res\.cloudinary\.com)\/\S+/i);

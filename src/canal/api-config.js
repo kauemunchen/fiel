@@ -91,7 +91,7 @@ export function rotasConfig(app) {
     res.json({
       google: { conectado: !!g, desde: g?.atualizado_em, escopos: { agenda: /calendar/.test(scope), gmail_ler: /gmail.readonly/.test(scope), gmail_enviar: /gmail.send/.test(scope), drive: /auth\/drive(\.file)?(\s|$)/.test(scope), drive_total: /auth\/drive(\s|$)/.test(scope), planilhas: /auth\/(spreadsheets|drive)(\s|$)/.test(scope), tasks: /auth\/tasks/.test(scope) }, modo: (await import('../integracoes/google-calendar.js')).modoEscopos(req.contaId), url_autorizar: urlAutorizacao(req.contaId) },
       telegram: !!db.prepare("SELECT 1 FROM usuarios WHERE conta_id=? AND canal='telegram'").get(req.contaId),
-      instagram: ig ? { conectado: true, ig_user_id: ig.ig_user_id, expira_em: ig.expira_em, desde: ig.atualizado_em, ...igInfo } : { conectado: false },
+      instagram: { ...(ig ? { conectado: true, ig_user_id: ig.ig_user_id, expira_em: ig.expira_em, desde: ig.atualizado_em, ...igInfo } : { conectado: false }), url_autorizar: (await import('../integracoes/instagram-oauth.js')).urlAutorizacao(req.contaId) },
       drive: { pasta_id: conta.drive_pasta_id, link: conta.drive_pasta_id ? `https://drive.google.com/drive/folders/${conta.drive_pasta_id}` : null },
       empresas: JSON.parse(conta.empresas || '[]'),
       planilhas: listarCadastradas(req.contaId),

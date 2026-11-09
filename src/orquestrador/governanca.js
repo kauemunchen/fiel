@@ -75,6 +75,7 @@ export async function governanca(msg, conta) {
     const pausados = db.prepare("SELECT id, tema, data FROM posts WHERE conta_id=? AND status='erro' ORDER BY data").all(conta.id);
     return `✅ Instagram conectado: @${me.username} (ID ${igId}, ${me.account_type || 'business'}). Token válido por ~60 dias; eu aviso 7 dias antes de vencer.${pausados.length ? `\n\nPosts que falharam e podem ser reagendados: ${pausados.map(p => `#${p.id}`).join(', ')} — diga "MIA, reagenda o post #N para <dia hora>".` : ''}\n\n⚠️ Apague a mensagem com o token do seu histórico do Telegram.`;
   }
+  if (/^conectar? instagram$/.test(t)) { const igo = await import('../integracoes/instagram-oauth.js'); const u = igo.urlAutorizacao(conta.id); if (u) return `📸 Toque no link, entre no Instagram da empresa e autorize:\n${u}\n\n(O perfil precisa ser Profissional. Enquanto o Fiel está em liberação pela Meta, o seu @ precisa estar cadastrado como testador — se der erro, fale com o suporte.)`; }
   if (/^conectar? instagram$/.test(t)) return 'Me mande numa linha: `conectar instagram <token IGAA…>` (gerado em Meus apps → KM Graph API → Instagram → Gerar tokens de acesso). O ID da conta eu descubro pelo token.';
   if (/^(quais|que) módulos|^módulos$|^equipe$/.test(t)) {
     const nomeDe = (mod) => { const r = db.prepare('SELECT nome FROM persona_config WHERE conta_id=? AND modulo=?').get(conta.id, mod); return r?.nome ? `${r.nome} (${mod === 'diretor' ? 'Diretor' : MODS[mod]})` : (mod === 'diretor' ? 'Diretor' : MODS[mod]); };

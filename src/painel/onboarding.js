@@ -74,8 +74,13 @@
       salvar: () => chamar('/api/onboarding/passo', { method: 'POST', body: { passo: 'mia', dados: { perfil: $o('#oPerfil').value, nicho: valorChip('nicho'), categoria: valorChip('nicho'), tom: valorChip('tomMarca'), cor_fundo: $o('#oFundo').dataset.mudou ? $o('#oFundo').value : '', cor_destaque: $o('#oDestaque').dataset.mudou ? $o('#oDestaque').value : '' } } }) }; },
 
     instagram: () => ({ titulo: 'Publicar no Instagram', sub: 'Opcional agora. Sem isso, a MIA cria e agenda; publicar fica para quando conectar.', html: E.instagram ? '<div class="onb-ok">✅ Instagram conectado</div>' : `
-      <label>Token do Instagram (conta profissional)<input id="oIgTok" placeholder="Cole aqui o token" autocomplete="off"></label>
-      <p class="onb-dica">Não tem o token? Toque em <b>Depois</b> — o passo a passo está no <a href="/ajuda#instagram" target="_blank" rel="noopener">manual</a> e em Conexões.</p><div class="onb-dica" id="oIgSt"></div>`,
+      ${E.instagram_url ? `<button type="button" class="btn ouro onb-grande" id="oIg">Conectar Instagram</button>
+      <p class="onb-dica">Entre com o Instagram da empresa (perfil <b>Profissional</b>) e toque em <b>Permitir</b>. Enquanto a Meta libera o Fiel, o seu @ precisa ter sido incluído pelo suporte e o convite aceito no Instagram: <b>Configurações → Apps e sites → Convites de testador</b>.</p>
+      <div class="onb-espera oculto" id="oIgEspera">Aguardando a autorização…</div>
+      <details class="onb-dica"><summary>Tenho um token de acesso</summary><input id="oIgTok" placeholder="IGAA…" autocomplete="off" style="margin-top:6px"></details>` : `
+      <label>Token de acesso do Instagram (IGAA…)<input id="oIgTok" placeholder="Cole aqui o token" autocomplete="off"></label>
+      <p class="onb-dica">Não tem o token? Toque em <b>Depois</b> — dá para conectar em Conexões.</p>`}<div class="onb-dica" id="oIgSt"></div>`,
+      montar: () => { const b = $o('#oIg'); if (!b) return; b.onclick = () => { const w = window.open(E.instagram_url, 'fielInstagram', 'width=520,height=720'); if (!w) location.href = E.instagram_url; $o('#oIgEspera').classList.remove('oculto'); vigiar(() => E.instagram, '#oIgEspera', '✅ Instagram conectado'); }; },
       salvar: async () => { const t = $o('#oIgTok')?.value.trim(); if (!t) return; const r = await chamar('/api/conexoes/instagram', { method: 'POST', body: { token: t } }); if (r.erro) { $o('#oIgSt').textContent = '⚠️ ' + r.erro; throw new Error(r.erro); } } }),
 
     teste: () => ({ titulo: 'Teste rápido', sub: 'Conferindo o que ficou pronto.', html: '<ul class="onb-teste" id="oTeste"><li>Testando…</li></ul>',
@@ -87,7 +92,7 @@
     clearInterval(poll);
     poll = setInterval(async () => { try { E = await chamar('/api/onboarding'); if (cond()) { clearInterval(poll); const el = $o(sel); if (el) { el.textContent = txtOk; el.classList.add('onb-ok'); } setTimeout(() => avancar(), 900); } } catch {} }, 2500);
   }
-  window.addEventListener('message', (ev) => { if (ev.data === 'fiel:google-erro' && $o('#oGEspera')) { clearInterval(poll); $o('#oGEspera').textContent = '⚠️ O Google não autorizou. Toque em Conectar de novo ou em Depois.'; } if (ev.data === 'fiel:google-ok' && $o('#onb')) chamar('/api/onboarding').then(e => { E = e; desenhar(); }); });
+  window.addEventListener('message', (ev) => { if (ev.data === 'fiel:google-erro' && $o('#oGEspera')) { clearInterval(poll); $o('#oGEspera').textContent = '⚠️ O Google não autorizou. Toque em Conectar de novo ou em Depois.'; } if (ev.data === 'fiel:instagram-erro' && $o('#oIgEspera')) { clearInterval(poll); $o('#oIgEspera').textContent = '⚠️ O Instagram não autorizou. Confira o convite de testador e tente de novo, ou toque em Depois.'; } if ((ev.data === 'fiel:google-ok' || ev.data === 'fiel:instagram-ok') && $o('#onb')) chamar('/api/onboarding').then(e => { E = e; desenhar(); }); });
 
   function desenhar() {
     const lista = etapas(); i = Math.min(i, lista.length - 1); const id = lista[i]; const t = TELAS[id]();

@@ -27,6 +27,7 @@ export async function estado(contaId) {
     telegram: !!db.prepare("SELECT 1 FROM usuarios WHERE conta_id=? AND canal='telegram'").get(contaId),
     google: { conectado: !!db.prepare('SELECT 1 FROM google_auth WHERE conta_id=?').get(contaId), url: urlGoogle },
     instagram: !!db.prepare('SELECT 1 FROM instagram_auth WHERE conta_id=?').get(contaId),
+    instagram_url: (await import('../integracoes/instagram-oauth.js')).urlAutorizacao(contaId),
     mia: { identidade: identidade(contaId) || {}, cores: k.cores || {}, assinatura: k.assinatura || '', logos: Object.keys(k.logos || {}).filter(v => k.logos[v]), fontes: k.fontes || '' },
   };
 }

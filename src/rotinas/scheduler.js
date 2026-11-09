@@ -74,10 +74,11 @@ async function limparBiblioteca(canal) {
   }
 }
 async function avisarTokenInstagram(canal) {
+  try { const igo = await import('../integracoes/instagram-oauth.js'); const r = await igo.renovarTokens(); if (r.renovados || r.falhas) console.log('[instagram] tokens renovados', r); } catch (e) { console.error('[instagram] renovar', e.message); }
   const hoje = hojeISO(); const limite = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   for (const r of db.prepare("SELECT a.conta_id, a.expira_em, u.chat_id FROM instagram_auth a JOIN usuarios u ON u.conta_id=a.conta_id AND u.papel='dono' WHERE a.expira_em IS NOT NULL AND a.expira_em<=?").all(limite)) {
     const dias = Math.round((new Date(r.expira_em) - new Date(hoje)) / 864e5);
-    await canal.enviar(r.conta_id, r.chat_id, `📸 O token do Instagram ${dias <= 0 ? 'venceu' : `vence em ${dias} dia(s)`} (${r.expira_em.split('-').reverse().join('/')}). Gere um novo em Meus apps → KM Graph API → Instagram → Gerar tokens e mande "conectar instagram <token>".`).catch(() => {});
+    await canal.enviar(r.conta_id, r.chat_id, `📸 O token do Instagram ${dias <= 0 ? 'venceu' : `vence em ${dias} dia(s)`} (${r.expira_em.split('-').reverse().join('/')}). Não consegui renovar sozinho: reconecte em Conexões → Instagram (ou mande "conectar instagram").`).catch(() => {});
   }
 }
 async function avisarFinanceiro(canal) {

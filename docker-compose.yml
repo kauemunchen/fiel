@@ -26,6 +26,8 @@ services:
       - GOOGLE_REDIRECT_URI=https://usefiel.com/oauth/google/callback
       # Seletor de arquivos do Google (chave pública do navegador, restrita a usefiel.com e à Picker API)
       - GOOGLE_PICKER_KEY=AIzaSyAOJJwXw_nJtu1xGhTY2ShYEzDwptIxwMk
+      # Login do Instagram (botão Conectar Instagram); INSTAGRAM_APP_ID/INSTAGRAM_APP_SECRET ficam no .env (o deploy grava a partir dos Secrets do GitHub)
+      - INSTAGRAM_REDIRECT_URI=https://usefiel.com/oauth/instagram/callback
     build: .
     container_name: assessor-km
     restart: unless-stopped

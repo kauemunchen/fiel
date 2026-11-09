@@ -5,6 +5,8 @@
 #   VPS_USER     — usuário SSH (ex.: root)
 #   VPS_SSH_KEY  — chave privada no formato OpenSSH (conteúdo do id_ed25519)
 #   VPS_PATH     — caminho do projeto no servidor (ex.: /docker/assessor)
+# Opcionais (se preenchidos, são gravados/atualizados no .env do servidor a cada deploy):
+#   INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET — login do Instagram (botão Conectar Instagram)
 
 name: deploy
 
@@ -23,12 +25,16 @@ jobs:
     steps:
       - name: Deploy no VPS por SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          INSTAGRAM_APP_ID: ${{ secrets.INSTAGRAM_APP_ID }}
+          INSTAGRAM_APP_SECRET: ${{ secrets.INSTAGRAM_APP_SECRET }}
         with:
           host: ${{ secrets.VPS_HOST }}
           port: ${{ secrets.VPS_PORT }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script_stop: true
+          envs: INSTAGRAM_APP_ID,INSTAGRAM_APP_SECRET
           command_timeout: 15m
           script: |
             set -euo pipefail
@@ -36,6 +42,10 @@ jobs:
             echo "==> git pull"
             git fetch --all --prune
             git reset --hard origin/main
+            echo "==> variáveis opcionais no .env"
+            upsert() { [ -n "$2" ] || return 0; touch .env; if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else printf '\n%s=%s\n' "$1" "$2" >> .env; fi; echo "$1 atualizado"; }
+            upsert INSTAGRAM_APP_ID "${INSTAGRAM_APP_ID:-}"
+            upsert INSTAGRAM_APP_SECRET "${INSTAGRAM_APP_SECRET:-}"
             echo "==> docker compose up -d --build"
             docker compose up -d --build render assessor
             echo "==> status"

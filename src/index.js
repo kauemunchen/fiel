@@ -78,6 +78,16 @@ servidor.listen(process.env.PORT || 3000, () => console.log('assessor-km up'));
 
 import { urlAutorizacao, salvarCodigo } from './integracoes/google-calendar.js';
 app.get('/oauth/google/iniciar/:contaId', (req, res) => res.redirect(urlAutorizacao(req.params.contaId)));
+app.get('/oauth/instagram/callback', async (req, res) => {
+  const pagina = (ok, titulo, texto) => `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><body style="font-family:system-ui;padding:40px;text-align:center"><h2>${titulo}</h2><p>${texto}</p><script>try{if(window.opener){window.opener.postMessage('fiel:instagram-${ok ? 'ok' : 'erro'}','*');setTimeout(()=>window.close(),${ok ? 1200 : 4000})}}catch(e){}</script>`;
+  const { state, code, error, error_reason } = req.query;
+  if (error || !code) return res.status(400).send(pagina(false, 'Instagram não conectou', error_reason === 'user_denied' ? 'A autorização foi cancelada. Volte ao Fiel e toque em <b>Conectar Instagram</b> de novo.' : 'O Instagram não devolveu a autorização. Confira se o seu perfil é <b>Profissional</b> e se você aceitou o convite de testador (Instagram → Configurações → Apps e sites → Convites de testador).'));
+  try {
+    const ig = await import('./integracoes/instagram-oauth.js'); const r = await ig.concluir(state, code);
+    try { const { canalAtual } = await import('./canal/atual.js'); const dono = db.prepare("SELECT chat_id FROM usuarios WHERE conta_id=? AND papel='dono' ORDER BY canal<>'telegram', id LIMIT 1").get(r.contaId)?.chat_id; if (dono) canalAtual()?.enviar(null, dono, { texto: `📸 Instagram conectado: @${r.username}. A MIA já pode publicar. A conexão se renova sozinha.`, modulo: 'social' }).catch(() => {}); } catch {}
+    res.send(pagina(true, `✅ Instagram @${r.username} conectado`, 'Pode voltar ao Fiel.'));
+  } catch (e) { console.error('[oauth] instagram:', e.message); res.status(500).send(pagina(false, 'Instagram não conectou', `${String(e.message).replace(/</g, '&lt;')}. Se o seu perfil ainda não foi liberado, peça ao suporte do Fiel para incluir o seu @ e aceite o convite no Instagram.`)); }
+});
 app.get('/oauth/google/callback', async (req, res) => {
   const { state, code, error } = req.query;
   if (error || !code) { console.error('[oauth] google retornou erro:', error || 'sem code', req.query); return res.status(400).send(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><body style="font-family:system-ui;padding:40px;text-align:center"><h2>Google não conectou</h2><p>${error === 'access_denied' ? 'A autorização foi cancelada ou recusada.' : 'O Google não devolveu a autorização.'} Volte ao Fiel e toque em <b>Conectar com o Google</b> de novo.</p><script>try{if(window.opener){window.opener.postMessage('fiel:google-erro','*');setTimeout(()=>window.close(),2500)}}catch(e){}</script>`); }
