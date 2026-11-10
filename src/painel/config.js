@@ -13,7 +13,7 @@ function mostrarTela(nome) {
   if (nome === 'conversa') { principal.classList.remove('modo-config'); cfg.classList.add('oculto'); cfg.innerHTML = ''; irParaFim(); preencherTrilho(); return; }
   $('#trilho')?.classList.add('oculto'); $('#app').classList.remove('com-trilho');
   if (!telas[nome]) { toast('Essa tela entra na próxima etapa.'); return; }
-  principal.classList.add('modo-config'); cfg.classList.remove('oculto', 'tela-hoje'); cfg.innerHTML = '<p class="sub">carregando…</p>';
+  principal.classList.add('modo-config'); cfg.classList.remove('oculto', 'tela-hoje', 'tela-fin'); cfg.innerHTML = '<p class="sub">carregando…</p>';
   telas[nome]().then(html => { cfg.innerHTML = `<h1><button class="icone" id="voltarConversa" aria-label="Menu"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>${html.titulo}</h1><p class="sub">${html.sub || ''}</p>${html.corpo}`; $('#voltarConversa').onclick = () => $('#lateral').classList.add('aberta'); html.depois?.(); })
     .catch(() => { cfg.innerHTML = '<p class="sub">Não consegui carregar agora. Tente de novo em instantes.</p>'; });
 }
@@ -445,3 +445,93 @@ telas.conta = async () => {
 
 // link direto para uma tela (ex.: /app#conexoes vindo do aviso de Instagram liberado)
 window.addEventListener('load', () => { const h = location.hash.slice(1); if (h && telas[h]) setTimeout(() => { try { mostrarTela(h); } catch {} }, 800); });
+
+// ---------------- FINANCEIRO (painel gerencial da Tina) ----------------
+const finEstado = { carteira: '', mes: '' };
+const brlF = (v, sinal) => { const n = Number(v || 0); const t = Math.abs(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); return (n < 0 ? '−' : sinal && n > 0 ? '+' : '') + t; };
+const brlK = (v) => { const n = Number(v || 0), a = Math.abs(n); return (n < 0 ? '−' : '') + (a >= 1e6 ? (a / 1e6).toFixed(1).replace('.', ',') + ' mi' : a >= 1e3 ? (a / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace('.', ',') + ' mil' : a.toFixed(0)); };
+const dataBR = (d) => d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '';
+const mesNome = (m) => new Date(m + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+const mesLongo = (m) => (t => t.charAt(0).toUpperCase() + t.slice(1))(new Date(m + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+function graficoPrevisao(serie) {
+  const W = 720, H = 220, pl = 56, pr = 16, pt = 16, pb = 28; const vs = serie.map(p => p.v);
+  let lo = Math.min(...vs), hi = Math.max(...vs); if (hi - lo < Math.max(1, Math.abs(hi) * .1)) { const m = Math.max(1, Math.abs(hi) * .1); lo -= m; hi += m; } const pad = (hi - lo) * .12; lo -= pad; hi += pad;
+  const x = (i) => pl + i / (serie.length - 1) * (W - pl - pr), y = (v) => pt + (hi - v) / (hi - lo) * (H - pt - pb);
+  const ticks = [lo, (lo + hi) / 2, hi].map(v => Math.round(v));
+  const path = serie.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+  const marcas = [0, 30, 60, 90].filter(i => i < serie.length);
+  return `<div class="fin-graf" data-serie='${JSON.stringify(serie.map(p => [p.d, p.v]))}' data-geo='${JSON.stringify({ W, pl, pr, n: serie.length, lo, hi, pt, pb, H })}'>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Previsão de saldo para os próximos 90 dias">
+      ${ticks.map(v => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" class="g-grade"/><text x="${pl - 8}" y="${y(v) + 4}" class="g-eixo" text-anchor="end">${brlK(v)}</text>`).join('')}
+      ${lo < 0 && hi > 0 ? `<line x1="${pl}" x2="${W - pr}" y1="${y(0)}" y2="${y(0)}" class="g-zero"/><text x="${W - pr}" y="${y(0) - 6}" class="g-eixo" text-anchor="end">zero</text>` : ''}
+      ${marcas.map(i => `<text x="${x(i)}" y="${H - 8}" class="g-eixo" text-anchor="middle">${i === 0 ? 'hoje' : '+' + i + 'd'}</text>`).join('')}
+      <path d="${path}" class="g-linha"/>
+      <circle cx="${x(0)}" cy="${y(serie[0].v)}" r="4.5" class="g-ponto"/>
+      <line class="g-cruz" x1="0" x2="0" y1="${pt}" y2="${H - pb}" style="display:none"/><circle class="g-alvo" r="5" style="display:none"/>
+    </svg><div class="g-tip" hidden></div></div>`;
+}
+function graficoMeses(hist) {
+  const W = 720, H = 220, pl = 56, pr = 16, pt = 16, pb = 28; const max = Math.max(1, ...hist.flatMap(h => [h.recebido, h.pago]));
+  const gw = (W - pl - pr) / hist.length, bw = Math.min(26, gw / 3), y = (v) => pt + (1 - v / max) * (H - pt - pb), base = H - pb;
+  const ticks = [0, max / 2, max];
+  const barra = (xx, v, cls, tip) => { const h = Math.max(0, base - y(v)); const r = Math.min(4, h); return `<path class="${cls}" data-tip="${tip}" d="M${xx},${base}V${base - h + r}Q${xx},${base - h} ${xx + r},${base - h}H${xx + bw - r}Q${xx + bw},${base - h} ${xx + bw},${base - h + r}V${base}Z"/><rect class="g-hit" data-tip="${tip}" x="${xx - 2}" y="${pt}" width="${bw + 4}" height="${base - pt}"/>`; };
+  return `<div class="fin-graf barras"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Entradas e saídas pagas nos últimos 6 meses">
+    ${ticks.map(v => `<line x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}" class="g-grade"/><text x="${pl - 8}" y="${y(v) + 4}" class="g-eixo" text-anchor="end">${brlK(v)}</text>`).join('')}
+    ${hist.map((h, i) => { const cx = pl + gw * i + gw / 2; return barra(cx - bw - 1, h.recebido, 'g-ent', `${mesNome(h.mes)} · recebido ${brlF(h.recebido)}`) + barra(cx + 1, h.pago, 'g-sai', `${mesNome(h.mes)} · pago ${brlF(h.pago)}`) + `<text x="${cx}" y="${H - 8}" class="g-eixo" text-anchor="middle">${mesNome(h.mes)}</text>`; }).join('')}
+  </svg><div class="g-tip" hidden></div></div>`;
+}
+function ligarGraficos(raiz) {
+  raiz.querySelectorAll('.fin-graf').forEach(g => {
+    const tip = g.querySelector('.g-tip'); const svg = g.querySelector('svg');
+    const mostra = (txt, ev) => { tip.hidden = false; tip.textContent = txt; const r = g.getBoundingClientRect(); let lx = ev.clientX - r.left + 12; if (lx > r.width - 180) lx -= 200; tip.style.left = lx + 'px'; tip.style.top = Math.max(0, ev.clientY - r.top - 40) + 'px'; };
+    if (g.dataset.serie) {
+      const s = JSON.parse(g.dataset.serie), G = JSON.parse(g.dataset.geo); const cruz = g.querySelector('.g-cruz'), alvo = g.querySelector('.g-alvo');
+      svg.addEventListener('pointermove', (ev) => { const r = svg.getBoundingClientRect(); const vx = (ev.clientX - r.left) / r.width * G.W; const i = Math.max(0, Math.min(G.n - 1, Math.round((vx - G.pl) / (G.W - G.pl - G.pr) * (G.n - 1))));
+        const px = G.pl + i / (G.n - 1) * (G.W - G.pl - G.pr), py = G.pt + (G.hi - s[i][1]) / (G.hi - G.lo) * (G.H - G.pt - G.pb);
+        cruz.setAttribute('x1', px); cruz.setAttribute('x2', px); cruz.style.display = ''; alvo.setAttribute('cx', px); alvo.setAttribute('cy', py); alvo.style.display = '';
+        mostra(`${dataBR(s[i][0])} · saldo previsto ${brlF(s[i][1])}`, ev); });
+      svg.addEventListener('pointerleave', () => { tip.hidden = true; cruz.style.display = 'none'; alvo.style.display = 'none'; });
+    } else {
+      svg.querySelectorAll('[data-tip]').forEach(el => { el.addEventListener('pointermove', (ev) => mostra(el.dataset.tip, ev)); el.addEventListener('pointerleave', () => { tip.hidden = true; }); });
+    }
+  });
+}
+telas.financeiro = async () => {
+  const q = new URLSearchParams(); if (finEstado.carteira) q.set('carteira', finEstado.carteira); if (finEstado.mes) q.set('mes', finEstado.mes);
+  const d = await api('/api/financeiro/painel?' + q); const nomeTina = me?.personas?.find(p => p.modulo === 'financeiro')?.nome || 'Tina';
+  const meses = []; { let m = d.hoje.slice(0, 7); for (let k = 0; k < 12; k++) { meses.push(m); const [a, b] = m.split('-').map(Number); m = b === 1 ? `${a - 1}-12` : `${a}-${String(b - 1).padStart(2, '0')}`; } }
+  const filtros = `<div class="fin-filtros"><div class="chips fin-chips" role="group" aria-label="Carteira">${['', ...d.carteiras].map(c => `<button type="button" data-cart="${esc(c)}" class="${(d.carteira || '') === c ? 'on' : ''}">${c ? esc(c) : 'Todas as carteiras'}</button>`).join('')}</div>
+    <label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div>`;
+  if (d.vazio) return { titulo: 'Financeiro', sub: `Painel gerencial da ${esc(nomeTina)}`, corpo: `<div class="cartao fin-vazio"><h3>Seu financeiro aparece aqui</h3><p class="d">Mande o extrato do banco (OFX ou CSV), uma foto de boleto ou nota, ou conte à ${esc(nomeTina)} o saldo atual. Ela organiza tudo e este painel se monta sozinho.</p><div class="h-acoes"><button class="btn-h pri" data-cmd="${esc(nomeTina)}, quero mandar o extrato do banco">Mandar extrato</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero informar o saldo atual da conta">Informar saldo</button></div></div>`,
+    depois: () => document.querySelectorAll('.fin-vazio [data-cmd]').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); }) };
+  const a = d.mes_atual, p = d.mes_anterior, delta = a.resultado - p.resultado;
+  const kpi = (rot, val, sub, cls = '') => `<div class="fin-kpi ${cls}"><span class="r">${rot}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  const kpis = `<div class="fin-kpis">
+    ${kpi('Saldo hoje', brlF(d.saldo.hoje), d.saldo.por_carteira.length > 1 ? d.saldo.por_carteira.map(s => `${esc(s.carteira)} ${brlF(s.saldo)}`).join(' · ') : esc(d.saldo.por_carteira[0]?.base || ''), 'destaque')}
+    ${kpi(`Resultado de ${mesNome(d.mes)}`, brlF(a.resultado, true), `${delta >= 0 ? '▲' : '▼'} ${brlF(Math.abs(delta))} vs ${mesNome(p.mes)}`, a.resultado < 0 ? 'neg' : '')}
+    ${kpi('Recebido no mês', brlF(a.recebido), `${mesNome(p.mes)}: ${brlF(p.recebido)}`)}
+    ${kpi('Pago no mês', brlF(a.pago), `${mesNome(p.mes)}: ${brlF(p.pago)}`)}
+    ${kpi('A receber · 30 dias', brlF(d.abertos.a_receber_30), d.abertos.atrasado_receber ? `<span class="fin-alerta">${brlF(d.abertos.atrasado_receber)} em atraso</span>` : 'nada em atraso')}
+    ${kpi('A pagar · 30 dias', brlF(d.abertos.a_pagar_30), d.abertos.atrasado_pagar ? `<span class="fin-alerta">${brlF(d.abertos.atrasado_pagar)} em atraso</span>` : 'nada em atraso')}
+    ${kpi('Saldo previsto em 30 dias', brlF(d.previsao.d30), d.previsao.menor.valor < 0 ? `<span class="fin-alerta">fica negativo em ${dataBR(d.previsao.menor.dia)}</span>` : `60d ${brlF(d.previsao.d60)} · 90d ${brlF(d.previsao.d90)}`, d.previsao.d30 < 0 ? 'neg' : '')}
+  </div>`;
+  const venc = d.vencimentos.length ? d.vencimentos.map((v, i) => `<div class="fin-lin${v.atrasado ? ' atras' : ''}"><time>${v.atrasado ? 'atrasada' : v.hoje ? 'hoje' : dataBR(v.venc)}</time><div class="h-txt"><span>${esc(v.descricao || v.contraparte || 'Lançamento')}</span><small>${esc(v.carteira)}${v.categoria ? ' · ' + esc(v.categoria) : ''}</small></div><b class="fin-v ${v.tipo}">${v.tipo === 'entrada' ? '+' : '−'}${brlF(v.valor)}</b><button class="btn-h sec fin-bx" data-i="${i}">${v.tipo === 'entrada' ? 'Recebi' : 'Paguei'}</button></div>`).join('') : '<p class="h-vazio">Nada a vencer nos próximos 30 dias.</p>';
+  const maxCat = Math.max(1, ...d.categorias.map(c => c.total));
+  const cats = d.categorias.length ? d.categorias.map(c => `<div class="fin-cat"><span>${esc(c.categoria)}</span><div class="fin-cat-b"><i style="width:${(c.total / maxCat * 100).toFixed(1)}%"></i></div><b>${brlF(c.total)}</b></div>`).join('') : '<p class="h-vazio">Sem despesas pagas neste mês.</p>';
+  const ult = d.ultimos.length ? d.ultimos.map(u => `<div class="fin-lin"><time>${dataBR(u.quando)}</time><div class="h-txt"><span>${esc(u.descricao || u.contraparte || 'Lançamento')}</span><small>${esc(u.carteira)}${u.categoria ? ' · ' + esc(u.categoria) : ''}</small></div><b class="fin-v ${u.tipo}">${u.tipo === 'entrada' ? '+' : '−'}${brlF(u.valor)}</b></div>`).join('') : '<p class="h-vazio">Nenhum lançamento pago ainda.</p>';
+  const tabela = (cab, linhas) => `<details class="fin-tab"><summary>Ver em tabela</summary><table><thead><tr>${cab.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>${linhas.map(l => `<tr>${l.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></details>`;
+  const corpo = filtros + kpis + `<div class="fin-grade">
+    <section class="cartao fin-box"><h3>Previsão de saldo · 90 dias</h3><p class="d">Saldo de hoje somado às contas a receber e a pagar já lançadas.</p>${graficoPrevisao(d.previsao.serie)}${tabela(['Quando', 'Saldo previsto'], [['Hoje', brlF(d.previsao.serie[0].v)], ['Em 30 dias', brlF(d.previsao.d30)], ['Em 60 dias', brlF(d.previsao.d60)], ['Em 90 dias', brlF(d.previsao.d90)], ['Menor saldo', `${brlF(d.previsao.menor.valor)} (${dataBR(d.previsao.menor.dia)})`]])}</section>
+    <section class="cartao fin-box"><h3>Recebido x pago · 6 meses</h3><div class="fin-leg"><span><i class="ent"></i>Recebido</span><span><i class="sai"></i>Pago</span></div>${graficoMeses(d.historico)}${tabela(['Mês', 'Recebido', 'Pago', 'Resultado'], d.historico.map(h => [mesNome(h.mes), brlF(h.recebido), brlF(h.pago), brlF(h.resultado, true)]))}</section>
+    <section class="cartao fin-box"><h3>A vencer · 30 dias${d.abertos.n_atrasados ? ` <span class="tag off">${d.abertos.n_atrasados} em atraso</span>` : ''}</h3>${venc}</section>
+    <section class="cartao fin-box"><h3>Despesas de ${mesNome(d.mes)} por categoria</h3>${cats}</section>
+    <section class="cartao fin-box largo"><h3>Últimos lançamentos</h3>${ult}<div class="h-acoes" style="margin-top:12px"><button class="btn-h sec" data-cmd="${esc(nomeTina)}, me manda o DRE de ${mesLongo(d.mes)}">Pedir DRE do mês</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero lançar uma conta">Lançar conta</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero mandar o extrato do banco">Mandar extrato</button></div></section>
+  </div>`;
+  return { titulo: 'Financeiro', sub: `Painel gerencial da ${esc(nomeTina)} · ${mesLongo(d.mes)}`, corpo, depois: () => {
+    const raiz = $('#tela-config'); raiz.classList.add('tela-fin'); ligarGraficos(raiz);
+    raiz.querySelectorAll('[data-cart]').forEach(b => b.onclick = () => { finEstado.carteira = b.dataset.cart; mostrarTela('financeiro'); });
+    $('#finMes').onchange = (e) => { finEstado.mes = e.target.value; mostrarTela('financeiro'); };
+    raiz.querySelectorAll('.fin-bx').forEach(b => b.onclick = () => { const v = d.vencimentos[b.dataset.i]; mostrarTela('conversa'); enviar(`${nomeTina}, ${v.tipo === 'entrada' ? 'recebi' : 'paguei'}: ${v.descricao || v.contraparte} (${brlF(v.valor)}, ${v.carteira}).`); });
+    raiz.querySelectorAll('.fin-box [data-cmd]').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); });
+  } };
+};

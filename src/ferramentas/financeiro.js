@@ -138,7 +138,7 @@ export function gerarDRE(contaId, { mes, carteira } = {}) {
   const alertas = []; if (atual.despesa_fixa_pct_receita > 60) alertas.push(`despesa fixa em ${atual.despesa_fixa_pct_receita}% da receita (limite 60%)`); if (atual.sem_categoria_liquido) alertas.push('há lançamentos sem categoria — recategorize para o DRE ficar exato');
   return { mes: m, carteira: cart || 'consolidado (todas)', atual, mes_anterior: { mes: ant, ...anterior }, alertas, instrucao: 'Responda com os números principais, a comparação com o mês anterior e 3 leituras curtas.' };
 }
-function saldoAtual(contaId, carteira) {
+export function saldoAtual(contaId, carteira) {
   const s = db.prepare('SELECT saldo, data FROM fin_saldos WHERE conta_id=? AND carteira=? ORDER BY data DESC, id DESC LIMIT 1').get(contaId, carteira);
   const desde = s?.data || '0000-00-00';
   const mov = db.prepare(`SELECT COALESCE(SUM(CASE WHEN tipo='entrada' THEN valor ELSE -valor END),0) v FROM fin_lancamentos WHERE conta_id=? AND carteira=? AND status='pago' AND oculto=0 AND ${efetiva} > ?`).get(contaId, carteira, desde).v;

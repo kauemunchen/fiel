@@ -155,4 +155,46 @@ export function rotasDados(app) {
     res.json({ data: hoje, saudacao: h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite', precisa, feito, depois, saldo,
       total: precisa.length + feito.length + depois.length });
   });
+
+  // ---------- Financeiro (Tina): painel gerencial ----------
+  app.get('/api/financeiro/painel', auth, async (req, res) => {
+    const F = await import('../ferramentas/financeiro.js'); F.prepararFinanceiro();
+    const id = req.contaId; const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    const soma = (d, n) => new Date(new Date(d + 'T12:00:00Z').getTime() + n * 864e5).toISOString().slice(0, 10);
+    const mesAnt = (m) => { const [a, b] = m.split('-').map(Number); return b === 1 ? `${a - 1}-12` : `${a}-${String(b - 1).padStart(2, '0')}`; };
+    const todas = [...new Set([...F.carteirasDe(id), ...db.prepare('SELECT DISTINCT carteira FROM fin_lancamentos WHERE conta_id=? AND oculto=0').all(id).map(r => r.carteira), ...db.prepare('SELECT DISTINCT carteira FROM fin_saldos WHERE conta_id=?').all(id).map(r => r.carteira)])].filter(Boolean);
+    const cart = req.query.carteira && todas.includes(req.query.carteira) ? req.query.carteira : null;
+    const carts = cart ? [cart] : todas;
+    const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : hoje.slice(0, 7);
+    const cond = cart ? ' AND carteira=?' : ''; const ca = cart ? [cart] : [];
+    const efet = 'COALESCE(pago_em, data)'; const semTransf = "AND COALESCE(categoria,'')<>'Transferência'";
+    const r2 = (v) => +Number(v || 0).toFixed(2);
+    const totMes = (m) => { const r = db.prepare(`SELECT COALESCE(SUM(CASE WHEN tipo='entrada' THEN valor END),0) ent, COALESCE(SUM(CASE WHEN tipo='saida' THEN valor END),0) sai, COUNT(*) n FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 ${semTransf} AND substr(${efet},1,7)=?`).get(id, ...ca, m); return { recebido: r2(r.ent), pago: r2(r.sai), resultado: r2(r.ent - r.sai), lancamentos: r.n }; };
+    const atual = totMes(mes), anterior = totMes(mesAnt(mes));
+    const saldos = carts.map(c => ({ carteira: c, ...F.saldoAtual(id, c) }));
+    const saldoHoje = r2(saldos.reduce((a, s) => a + s.saldo, 0));
+    const prev = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, categoria, COALESCE(vencimento,data) venc, documento FROM fin_lancamentos WHERE conta_id=?${cond} AND status IN ('previsto','pendente') AND oculto=0 ORDER BY venc`).all(id, ...ca);
+    const ate = (d) => prev.filter(p => p.venc <= d);
+    const somaT = (l, t) => r2(l.filter(p => p.tipo === t).reduce((a, p) => a + p.valor, 0));
+    const atras = prev.filter(p => p.venc < hoje);
+    const p30 = ate(soma(hoje, 30));
+    // Previsão: saldo dia a dia nos próximos 90 dias (atrasados entram hoje)
+    const serie = []; let corr = saldoHoje; const porDia = {};
+    for (const p of prev) { const d = p.venc < hoje ? hoje : p.venc; porDia[d] = (porDia[d] || 0) + (p.tipo === 'entrada' ? p.valor : -p.valor); }
+    let minimo = { valor: saldoHoje, dia: hoje };
+    for (let k = 0; k <= 90; k++) { const d = soma(hoje, k); corr += porDia[d] || 0; serie.push({ d, v: r2(corr) }); if (corr < minimo.valor) minimo = { valor: r2(corr), dia: d }; }
+    const proj = (n) => serie[n]?.v ?? saldoHoje;
+    // Últimos 6 meses
+    const meses = []; let m = mes; for (let k = 0; k < 6; k++) { meses.unshift(m); m = mesAnt(m); }
+    const historico = meses.map(mm => ({ mes: mm, ...totMes(mm) }));
+    const categorias = db.prepare(`SELECT COALESCE(categoria,'Sem categoria') categoria, SUM(valor) total FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 AND tipo='saida' ${semTransf} AND substr(${efet},1,7)=? GROUP BY 1 ORDER BY total DESC LIMIT 6`).all(id, ...ca, mes).map(c => ({ categoria: c.categoria, total: r2(c.total) }));
+    const ultimos = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, categoria, ${efet} quando FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 ORDER BY ${efet} DESC, id DESC LIMIT 10`).all(id, ...ca);
+    res.json({ hoje, mes, carteira: cart, carteiras: todas, vazio: !prev.length && !ultimos.length && !saldos.some(s => s.tem_saldo_inicial),
+      saldo: { hoje: saldoHoje, por_carteira: saldos.map(s => ({ carteira: s.carteira, saldo: s.saldo, base: s.base })) },
+      mes_atual: atual, mes_anterior: { mes: mesAnt(mes), ...anterior },
+      abertos: { a_receber_30: somaT(p30, 'entrada'), a_pagar_30: somaT(p30, 'saida'), atrasado_receber: somaT(atras, 'entrada'), atrasado_pagar: somaT(atras, 'saida'), n_atrasados: atras.length },
+      previsao: { d30: proj(30), d60: proj(60), d90: proj(90), menor: minimo, serie },
+      historico, categorias, ultimos,
+      vencimentos: prev.filter(p => p.venc <= soma(hoje, 30)).slice(0, 12).map(p => ({ ...p, atrasado: p.venc < hoje, hoje: p.venc === hoje })) });
+  });
 }
