@@ -29,7 +29,7 @@ export function montarPrompt({ modulo, conta, ativos, texto: mensagem = '' }) {
     hora_resumo: cfg.hora_resumo, hora_fechamento: cfg.hora_fechamento, hora_semana: cfg.hora_semana,
     hora_retornos: cfg.hora_retornos, hora_checagem: cfg.hora_checagem, hora_checagem_1: '12h', hora_checagem_2: '17h',
     janela_silencio: conta.janela_silencio || '22h–6h e domingo', padrao_tarde: cfg.padrao_tarde || '14h',
-    memoria: lerMemoria(conta.id, modulo).map(m => `- ${m}`).join('\n') || '- (nada ainda)',
+    memoria: '(ver bloco MEMÓRIA no fim destas instruções)',
   };
   // MIA: a conta KM (admin) usa o manual KM; clientes usam a persona genérica + o kit de marca deles.
   const cliente = modulo === 'social' && !usaKM(conta.id);
@@ -44,5 +44,7 @@ export function montarPrompt({ modulo, conta, ativos, texto: mensagem = '' }) {
     if (ref.length > 7000) ref = ref.slice(0, 7000) + '\n[…]';
     texto += `\n\nREFERÊNCIA DE EXPERTISE\n${ref}`;
   }
-  return texto;
+  // Memória muda com frequência: fica no FIM para o início do prompt ser idêntico entre mensagens (cache implícito do Gemini = entrada mais barata).
+  return texto + MARCA_MEMORIA + (lerMemoria(conta.id, modulo).map(m => `- ${m}`).join('\n') || '- (nada ainda)');
 }
+export const MARCA_MEMORIA = '\n\nMEMÓRIA (fatos que o dono já te contou):\n';

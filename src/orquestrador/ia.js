@@ -4,6 +4,7 @@ import { ferramentasDe, executarFerramenta, precisaConfirmar } from '../ferramen
 import { novoContador } from './limite-pecas.js';
 import { db } from '../db/index.js';
 import { historicoRecente } from './memoria.js';
+import { MARCA_MEMORIA } from './montador-prompt.js';
 export { transcrever } from '../integracoes/gemini.js';
 
 // Pistas fortes (decidem sozinhas) e pistas comuns
@@ -67,7 +68,11 @@ TELEFONES — PRIORIDADE DE CONTATO: toda vez que você devolve um telefone de e
 - Se receber mais de um número, lista o WhatsApp PRIMEIRO, fixo depois.
 - Celular internacional: use o código do país correto (55 Brasil, 1 EUA, etc.) e mesma estrutura wa.me.
 - Nunca omita o link. "Prioridade de contato" significa: a primeira linha de contato que o dono vê deve ser clicável para abrir o WhatsApp.` : '';
-  const systemInstruction = `${prompt}\n\nAGORA: ${agoraBR()} (America/Sao_Paulo). Datas relativas ("amanhã", "quinta") são calculadas a partir daqui e passadas às ferramentas no formato YYYY-MM-DDTHH:MM.
+  // Ordem pensada para o cache implícito do Gemini: tudo que é fixo (persona, expertise, regras) primeiro;
+  // memória e data/hora (mudam sempre) no fim. Assim o começo se repete entre mensagens e sai com desconto.
+  const iMem = prompt.lastIndexOf(MARCA_MEMORIA);
+  const fixo = iMem >= 0 ? prompt.slice(0, iMem) : prompt; const memoriaTxt = iMem >= 0 ? prompt.slice(iMem) : '';
+  const systemInstruction = `${fixo}
 
 Os prefixos [módulo] no histórico são marcação interna: NUNCA os escreva nas suas respostas.
 
@@ -79,7 +84,9 @@ VERDADE: só prometa o que suas ferramentas fazem. Comandos de conexão/configur
 
 CONTEXTO: as mensagens anteriores desta conversa estão no histórico (respostas de outros assessores vêm marcadas com [módulo]). Use-as: se o dono responder "aprovar", "agenda", "ajusta", "sim", refere-se ao que foi proposto por último.
 
-FORMATO (canal de mensagem, não é documento): sem títulos com #, sem tabelas, sem linhas ---. Negrito só com *uma palavra*. Listas com "-" e no máximo 5 itens. Resposta "curta" = até 6 linhas; "média" = até 12; "completa" = até 25. Vá direto ao ponto, sem introdução nem fechamento.`;
+FORMATO (canal de mensagem, não é documento): sem títulos com #, sem tabelas, sem linhas ---. Negrito só com *uma palavra*. Listas com "-" e no máximo 5 itens. Resposta "curta" = até 6 linhas; "média" = até 12; "completa" = até 25. Vá direto ao ponto, sem introdução nem fechamento.${memoriaTxt}
+
+AGORA: ${agoraBR()} (America/Sao_Paulo). Datas relativas ("amanhã", "quinta") são calculadas a partir daqui e passadas às ferramentas no formato YYYY-MM-DDTHH:MM.`;
   const toolsConfig = montarTools(decls, modulo, conta);
   // Quando mistura functionDeclarations + googleSearch (built-in), Gemini exige esta flag.
   const extraCfg = temBuscaWeb && decls?.length ? { toolConfig: { includeServerSideToolInvocations: true } } : {};
@@ -87,11 +94,14 @@ FORMATO (canal de mensagem, não é documento): sem títulos com #, sem tabelas,
   let m = modelo({ systemInstruction, tools: toolsConfig, ...extraCfg }, { economico });
   const corta = (t, n = 1800) => (t || '').length > n ? (t || '').slice(0, n) + ' […]' : (t || '');
   const contents = [];
-  for (const h of historicoRecente(conta.id, 8)) {
-    if (!h.entrada || !h.saida) continue;
-    contents.push({ role: 'user', parts: [{ text: corta(h.entrada) }] });
-    contents.push({ role: 'model', parts: [{ text: `[${h.modulo}] ` + corta(h.saida) }] });
-  }
+  // Histórico enxuto: as 3 trocas mais recentes quase inteiras; as 5 anteriores só o essencial (economiza entrada em toda chamada).
+  const hist = historicoRecente(conta.id, 8);
+  hist.forEach((h, i) => {
+    if (!h.entrada || !h.saida) return;
+    const recente = i >= hist.length - 3; const n = recente ? 1500 : 350;
+    contents.push({ role: 'user', parts: [{ text: corta(h.entrada, n) }] });
+    contents.push({ role: 'model', parts: [{ text: `[${h.modulo}] ` + corta(h.saida, n) }] });
+  });
   contents.push({ role: 'user', parts: [{ text: msg.texto }] });
   let ultimoErro = null, assinaturaAnterior = ''; const consultados = new Set(); let ultimoResultado = null;
   const contador = novoContador(conta.id, msg.textoOriginal ?? msg.texto); // proteção de consumo: peças/rascunhos por mensagem

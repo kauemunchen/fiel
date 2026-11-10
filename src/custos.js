@@ -18,6 +18,9 @@ export const PRECOS_PADRAO = {
   'gemini-2.0-flash-lite_in': 0.075, 'gemini-2.0-flash-lite_out': 0.30,
   'gemini-1.5-flash_in': 0.075,'gemini-1.5-flash_out': 0.30, // ≤128k. Acima: 0.15 / 0.60
   'gemini-1.5-pro_in': 1.25,   'gemini-1.5-pro_out': 5.00,   // ≤128k. Acima: 2.50 / 10.00
+  // Cache implícito do Gemini: tokens de entrada repetidos (prompt fixo da persona) saem com desconto.
+  // Google cobra 10–25% do preço de entrada conforme o modelo; usamos 25% (conservador).
+  'gemini_cache_fator': 0.25,
   // Fal.ai (USD por imagem) — flux/schnell que a MIA usa fica em torno de US$ 0,003
   'fal_imagem_usd': S(0.003),
   // Imagen 4 / OpenAI gpt-image e edição (Gemini Flash Image / FLUX Kontext) — ~US$ 0,04 por imagem
@@ -150,8 +153,8 @@ function normalizaModelo(modelo) {
 /** Custo de IA (USD → BRL) nos últimos N dias, podendo filtrar por conta. */
 export function custoIA({ contaId = null, dias = 30 } = {}) {
   const p = precos(); const cambio = p['usd_brl'] || 5.5;
-  const rows = db.prepare(`SELECT modelo, SUM(tokens_in) ti, SUM(tokens_out) to_ FROM uso WHERE criado_em >= datetime('now','-'||?||' days') ${contaId ? 'AND conta_id=?' : ''} GROUP BY modelo`).all(dias, ...(contaId ? [contaId] : []));
-  let totalUsd = 0; const detalhe = rows.map(r => { const m = normalizaModelo(r.modelo); const c = (r.ti || 0) / 1e6 * (p[m + '_in'] || 0) + (r.to_ || 0) / 1e6 * (p[m + '_out'] || 0); totalUsd += c; return { modelo: r.modelo, modelo_norm: m, tokens_in: r.ti || 0, tokens_out: r.to_ || 0, custo_usd: +c.toFixed(4), custo_brl: +(c * cambio).toFixed(2) }; });
+  const rows = db.prepare(`SELECT modelo, SUM(tokens_in) ti, SUM(tokens_out) to_, SUM(COALESCE(tokens_cache,0)) tc FROM uso WHERE criado_em >= datetime('now','-'||?||' days') ${contaId ? 'AND conta_id=?' : ''} GROUP BY modelo`).all(dias, ...(contaId ? [contaId] : []));
+  let totalUsd = 0; const detalhe = rows.map(r => { const m = normalizaModelo(r.modelo); const fc = p['gemini_cache_fator'] ?? 0.25; const tc = Math.min(r.tc || 0, r.ti || 0); const c = (((r.ti || 0) - tc) + tc * fc) / 1e6 * (p[m + '_in'] || 0) + (r.to_ || 0) / 1e6 * (p[m + '_out'] || 0); totalUsd += c; return { modelo: r.modelo, modelo_norm: m, tokens_in: r.ti || 0, tokens_cache: tc, tokens_out: r.to_ || 0, custo_usd: +c.toFixed(4), custo_brl: +(c * cambio).toFixed(2) }; });
   return { total_usd: +totalUsd.toFixed(4), total_brl: +(totalUsd * cambio).toFixed(2), por_modelo: detalhe, cambio };
 }
 
@@ -173,7 +176,7 @@ export function resumo({ contaId = null, dias = 30 } = {}) {
   const custoTotal = +((ia.total_brl || 0) + (mp.total_taxa || 0) + (contaId ? 0 : infra)).toFixed(2);
   const margem = +((receita - custoTotal) + (contaId ? 0 : 0)).toFixed(2); // líquido antes de MP já embutido? Vamos considerar: margem = liquido_mp - ia - infra
   const margemReal = contaId ? 0 : +((mp.total_liquido || 0) - (ia.total_brl || 0) - infra).toFixed(2);
-  return { dias, ia, mp, infra_brl: contaId ? 0 : infra, receita_brl: receita, custo_total_brl: custoTotal, margem_brl: margemReal, precos: p };
+  return { dias, ia, mp, infra_brl: contaId ? 0 : infra, receita_brl: receita, custo_total_brl: custoTotal, margem_brl: margemReal, precos: p, avisos: avisosPreco() };
 }
 
 /** Matriz pacote × modelo: para cada pacote, qual seria o custo e margem se o cliente usasse só aquele modelo. */
@@ -261,4 +264,14 @@ export async function margemPacotes() {
     meta_pct: +(metaFrac * 100).toFixed(0),
     custo_por_token_brl: +custoPorTokenBRL.toFixed(8),
   };
+}
+
+/** Avisos de preço: o Flash 3.x está em preço promocional até jan/2027 — a partir daí, lembrar de revisar no painel. */
+export function avisosPreco(hoje = new Date()) {
+  const avisos = [];
+  const revisado = db.prepare("SELECT valor FROM custos_cfg WHERE chave='preco_flash_revisado_em'").get()?.valor;
+  const virada = new Date('2027-01-01T00:00:00-03:00');
+  if (hoje >= virada && !(Number(revisado) >= virada.getTime()))
+    avisos.push('O preço promocional do Gemini Flash 3.x (US$ 0,75/3,75 por 1M) pode ter acabado. Confira ai.google.dev/pricing, atualize "gemini-3x-flash" aqui e, se subiu, avalie passar a MIA para o Flash-Lite (MODELO_PADRAO). Salvar o preço do Flash some com este aviso.');
+  return avisos;
 }

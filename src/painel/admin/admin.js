@@ -30,7 +30,9 @@ function montarTela(nome) {
 telas.resumo = async () => {
   const d = await api('/api/admin/resumo');
   const spark = (serie, chave) => { const max = Math.max(1, ...serie.map(x => x[chave] || 0)); return `<div class="sparkline">${serie.map(x => `<div title="${x.d}: ${x[chave] || 0}" style="height:${Math.max(2, (x[chave] || 0) / max * 38)}px"></div>`).join('')}</div>`; };
-  const corpo = `<div class="kpis">
+  const avisos = (d.geral.avisos || []).map(a => `<div style="background:#FFF4E5;border:1px solid #F0B45A;border-radius:12px;padding:12px 16px;margin-bottom:12px">⚠️ ${a}</div>`).join('');
+  const cacheTok = (d.geral.ia.por_modelo || []).reduce((s, m) => s + (m.tokens_cache || 0), 0), inTok = (d.geral.ia.por_modelo || []).reduce((s, m) => s + (m.tokens_in || 0), 0);
+  const corpo = avisos + `<div class="kpis">
     <div class="kpi"><div class="r">Contas</div><div class="v">${fmtN(d.contas.total)}</div><div class="s">${d.contas.ativas} ativas · ${d.contas.bloqueadas} bloqueadas · ${d.contas.em_trial} em trial</div></div>
     <div class="kpi"><div class="r">Faturamento 30d</div><div class="v">${fmtR(d.faturamento_30d.bruto)}</div><div class="s">${d.faturamento_30d.n} cobranças · hoje ${fmtR(d.faturamento_hoje.bruto)}</div>${spark(d.por_dia, 'r')}</div>
     <div class="kpi"><div class="r">Pendente</div><div class="v">${fmtR(d.pendente.bruto)}</div><div class="s">${d.pendente.n} cobranças aguardando</div></div>
@@ -180,7 +182,7 @@ telas.custos = async () => {
   const inp = (k, step, w) => `<input class="pr" data-k="${k}" type="number" step="${step}" value="${p[k]}" style="width:${w || 90}px">`;
   const corpo = `<div class="kpis">
     <div class="kpi"><div class="r">Receita (30d)</div><div class="v">${fmtR(d.geral.receita_brl)}</div><div class="s">bruto · ${fmtR(d.geral.mp.total_liquido)} líquido depois do MP</div></div>
-    <div class="kpi"><div class="r">Custo IA (30d)</div><div class="v">${fmtR(d.geral.ia.total_brl)}</div><div class="s">US$ ${d.geral.ia.total_usd.toFixed(4)} · câmbio R$ ${p.usd_brl}</div></div>
+    <div class="kpi"><div class="r">Custo IA (30d)</div><div class="v">${fmtR(d.geral.ia.total_brl)}</div><div class="s">US$ ${d.geral.ia.total_usd.toFixed(4)} · câmbio R$ ${p.usd_brl}${inTok ? ` · cache ${Math.round(cacheTok / inTok * 100)}% da entrada` : ''}</div></div>
     <div class="kpi"><div class="r">Taxas Mercado Pago (30d)</div><div class="v">${fmtR(d.geral.mp.total_taxa)}</div><div class="s">${d.geral.mp.por_forma.length} tipos de cobrança</div></div>
     <div class="kpi"><div class="r">Infra fixa (30d)</div><div class="v">${fmtR(d.geral.infra_brl)}</div><div class="s">VPS + domínio + backups</div></div>
     <div class="kpi" style="border:1px solid ${d.geral.margem_brl >= 0 ? '#4CAF7A' : '#E25D5D'}"><div class="r">Margem líquida (30d)</div><div class="v" style="color:${d.geral.margem_brl >= 0 ? '#1E7A45' : '#B4232A'}">${fmtR(d.geral.margem_brl)}</div><div class="s">receita − IA − taxas MP − infra</div></div>

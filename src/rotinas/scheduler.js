@@ -47,7 +47,7 @@ async function resumoDoDia(canal, conta, chatId) {
   const retornos = db.prepare(`SELECT pessoa, assunto, direcao FROM retornos WHERE conta_id=? AND status='aberto'`).all(conta.id);
   const dados = JSON.stringify({ eventos: eventos.map(e => ({ h: (e.start?.dateTime || '').slice(11, 16), t: e.summary, local: e.location })), lembretes, tarefas, retornos });
   const prompt = montarPrompt({ modulo: 'diretor', conta, ativos: modulosAtivos(conta.id) });
-  const r = await modelo({ systemInstruction: prompt }).generateContent(`Monte o resumo do dia para o dono com estes dados (JSON). Curto, por blocos, sem floreio:\n${dados}`);
+  const r = await modelo({ systemInstruction: prompt }, { economico: true }).generateContent(`Monte o resumo do dia para o dono com estes dados (JSON). Curto, por blocos, sem floreio:\n${dados}`);
   await canal.enviar(conta.id, chatId, r.response.text());
 }
 
