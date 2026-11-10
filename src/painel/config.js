@@ -6,16 +6,18 @@ async function del(url) { return api(url, { method: 'DELETE' }); }
 const sel = (nome, opcoes, atual) => `<select name="${nome}">${opcoes.map(o => `<option ${o === atual ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
 
 window.telas = telas;
+let seqTela = 0; // só a última tela pedida é desenhada (evita uma resposta lenta cobrir a tela atual)
 function mostrarTela(nome) {
   const principal = $('#principal'); const cfg = $('#tela-config');
   document.querySelectorAll('.menu a, #tabbar a').forEach(a => a.classList.toggle('ativo', a.dataset.tela === nome));
   document.body.dataset.tela = nome;
-  if (nome === 'conversa') { principal.classList.remove('modo-config'); cfg.classList.add('oculto'); cfg.innerHTML = ''; irParaFim(); preencherTrilho(); return; }
+  if (nome === 'conversa') { seqTela++; principal.classList.remove('modo-config'); cfg.classList.add('oculto'); cfg.innerHTML = ''; irParaFim(); preencherTrilho(); return; }
   $('#trilho')?.classList.add('oculto'); $('#app').classList.remove('com-trilho');
   if (!telas[nome]) { toast('Essa tela entra na próxima etapa.'); return; }
   principal.classList.add('modo-config'); cfg.classList.remove('oculto', 'tela-hoje', 'tela-fin'); cfg.innerHTML = '<p class="sub">carregando…</p>';
-  telas[nome]().then(html => { cfg.innerHTML = `<h1><button class="icone" id="voltarConversa" aria-label="Menu"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>${html.titulo}</h1><p class="sub">${html.sub || ''}</p>${html.corpo}`; $('#voltarConversa').onclick = () => $('#lateral').classList.add('aberta'); html.depois?.(); })
-    .catch(() => { cfg.innerHTML = '<p class="sub">Não consegui carregar agora. Tente de novo em instantes.</p>'; });
+  const seq = ++seqTela;
+  telas[nome]().then(html => { if (seq !== seqTela) return; cfg.innerHTML = `<h1><button class="icone" id="voltarConversa" aria-label="Menu"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>${html.titulo}</h1><p class="sub">${html.sub || ''}</p>${html.corpo}`; $('#voltarConversa').onclick = () => $('#lateral').classList.add('aberta'); html.depois?.(); })
+    .catch(() => { if (seq === seqTela) cfg.innerHTML = '<p class="sub">Não consegui carregar agora. Tente de novo em instantes.</p>'; });
 }
 
 // ---------------- HOJE (tela inicial: o dia em sequência) ----------------
@@ -30,7 +32,7 @@ function ligarAcoes(raiz, itens) {
     if (a.cmd) { mostrarTela('conversa'); enviar(a.cmd); hojeCache = null; } });
 }
 telas.hoje = async () => {
-  const d = await dadosHoje(true); const nomeDono = (me?.conta?.nome_dono || '').split(' ')[0];
+  const d = hojeCache && Date.now() - hojeCache.t < 300000 ? (dadosHoje(true).catch(() => {}), hojeCache.d) : await dadosHoje(true); const nomeDono = (me?.conta?.nome_dono || '').split(' ')[0];
   const dataTxt = (t => t.charAt(0).toUpperCase() + t.slice(1))(new Date(d.data + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
   const nFeito = d.feito.length, nPrecisa = d.precisa.length, total = Math.max(1, d.total);
   const resumo = nFeito || nPrecisa ? `${nFeito ? `A equipe já resolveu ${nFeito} ${nFeito === 1 ? 'coisa' : 'coisas'} hoje.` : 'Nada concluído ainda hoje.'} ${nPrecisa ? `<b>${nPrecisa} ${nPrecisa === 1 ? 'precisa' : 'precisam'} de você.</b>` : '<b>Nada depende de você agora.</b>'}` : 'Dia tranquilo por enquanto. Peça qualquer coisa à equipe.';

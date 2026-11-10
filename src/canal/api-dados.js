@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { sessao } from './web.js';
 import { contextoUso } from '../integracoes/gemini.js';
 
+const cacheAgenda = new Map();
 export function rotasDados(app) {
   const auth = (req, res, next) => { const s = sessao(req); if (!s) return res.status(401).json({ erro: 'não autenticado' }); req.contaId = s.conta_id; req.chatId = s.chat_id; contextoUso.contaId = s.conta_id; next(); };
   const conta = (req) => db.prepare('SELECT * FROM contas WHERE id=?').get(req.contaId);
@@ -137,8 +138,12 @@ export function rotasDados(app) {
 
     // 3. Ainda hoje
     try {
-      const gcal = await import('../integracoes/google-calendar.js');
-      const evs = await gcal.listarEventos(id, { inicio: new Date(agora + ':00-03:00').toISOString(), fim: new Date(amanha + 'T00:00:00-03:00').toISOString(), max: 12 });
+      // Agenda do Google: cache de 3 min por conta e no máximo 2,5 s de espera (a tela não fica presa no Google).
+      const gcal = await import('../integracoes/google-calendar.js'); const c = cacheAgenda.get(id);
+      let evs;
+      if (c && Date.now() - c.t < 180000 && c.dia === hoje) evs = c.evs.filter(e => !e.start?.dateTime || new Date(e.start.dateTime) >= new Date(agora + ':00-03:00'));
+      else { const busca = gcal.listarEventos(id, { inicio: new Date(hoje + 'T00:00:00-03:00').toISOString(), fim: new Date(amanha + 'T00:00:00-03:00').toISOString(), max: 20 }).then(l => { cacheAgenda.set(id, { t: Date.now(), dia: hoje, evs: l || [] }); return l; });
+        busca.catch(() => {}); evs = await Promise.race([busca, new Promise((_, r) => setTimeout(() => r(new Error('tempo')), 2500))]); evs = (evs || []).filter(e => !e.start?.dateTime || new Date(e.start.dateTime) >= new Date(agora + ':00-03:00')); }
       for (const e of evs || []) { const h = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }) : 'dia todo';
         depois.push({ hora: h, titulo: curto(e.summary || 'Compromisso', 60), detalhe: curto(e.location || '', 60), modulo: 'secretaria', quem: quem('secretaria') }); }
     } catch {}
