@@ -98,4 +98,61 @@ export function rotasDados(app) {
     try { res.json(await doc.executar('salvar_cadastro', req.body || {}, conta(req), { confirmado: true })); } catch (e) { res.status(400).json({ erro: e.message }); }
   });
   app.delete('/api/cadastros/:id', auth, (req, res) => { db.prepare('DELETE FROM cadastros WHERE id=? AND conta_id=?').run(req.params.id, req.contaId); res.json({ ok: true }); });
+
+  // ---------- Hoje: o dia do dono em sequência (precisa de você → equipe já fez → ainda hoje) ----------
+  app.get('/api/hoje', auth, async (req, res) => {
+    const id = req.contaId; const TZ = 'America/Sao_Paulo';
+    const agora = new Date().toLocaleString('sv-SE', { timeZone: TZ }).replace(' ', 'T').slice(0, 16); const hoje = agora.slice(0, 10);
+    const amanha = new Date(new Date(hoje + 'T12:00:00Z').getTime() + 864e5).toISOString().slice(0, 10);
+    const q = (sql, ...a) => { try { return db.prepare(sql).all(...a); } catch { return []; } };
+    const nomes = Object.fromEntries(q('SELECT modulo, nome FROM persona_config WHERE conta_id=?', id).map(r => [r.modulo, r.nome]));
+    const quem = (m) => nomes[m] || { diretor: 'Alfred', secretaria: 'Olga', documentos: 'Estag', financeiro: 'Tina', social: 'MIA' }[m] || 'Fiel';
+    const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const curto = (t, n = 90) => { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+    const precisa = [], feito = [], depois = [];
+
+    // 1. Precisa de você
+    for (const f of q(`SELECT id, descricao, contraparte, valor, vencimento, documento FROM fin_lancamentos WHERE conta_id=? AND tipo='saida' AND status IN ('pendente','previsto') AND oculto=0 AND vencimento IS NOT NULL AND vencimento<=? ORDER BY vencimento LIMIT 6`, id, hoje)) {
+      const atrasado = f.vencimento < hoje;
+      precisa.push({ tipo: 'conta', modulo: 'financeiro', quem: quem('financeiro'), titulo: `${curto(f.descricao || f.contraparte || 'Conta a pagar', 60)} · ${brl(f.valor)}`,
+        detalhe: atrasado ? `venceu em ${f.vencimento.split('-').reverse().join('/')}` : 'vence hoje', alerta: true,
+        acoes: [...(f.documento && /^[\d .]{30,}$/.test(f.documento) ? [{ rotulo: 'Copiar código', copiar: f.documento.replace(/\D/g, '') }] : []), { rotulo: 'Já paguei', cmd: `Tina, já paguei: ${f.descricao || f.contraparte} (${brl(f.valor)}).`, sec: true }] });
+    }
+    for (const p of q(`SELECT id, tema, status FROM posts WHERE conta_id=? AND (status='erro' OR (status='rascunho' AND data IS NULL)) ORDER BY id DESC LIMIT 4`, id))
+      precisa.push({ tipo: 'post', modulo: 'social', quem: quem('social'), titulo: p.status === 'erro' ? `Post não publicou: ${curto(p.tema || 'sem tema', 50)}` : `Rascunho de post: ${curto(p.tema || 'sem tema', 50)}`,
+        detalhe: p.status === 'erro' ? 'precisa tentar de novo' : 'escolha a data para publicar', alerta: p.status === 'erro', acoes: [{ rotulo: 'Abrir no calendário', tela: 'editorial' }] });
+    for (const t of q(`SELECT titulo, prazo FROM tarefas WHERE conta_id=? AND status='aberta' AND prazo IS NOT NULL AND prazo<=? ORDER BY prazo LIMIT 4`, id, hoje))
+      precisa.push({ tipo: 'tarefa', modulo: 'secretaria', quem: quem('secretaria'), titulo: curto(t.titulo, 70), detalhe: t.prazo < hoje ? 'tarefa atrasada' : 'prazo hoje', alerta: t.prazo < hoje,
+        acoes: [{ rotulo: 'Concluir', cmd: `Olga, marca como concluída a tarefa "${t.titulo}".` }] });
+    for (const r of q(`SELECT pessoa, assunto, direcao FROM retornos WHERE conta_id=? AND status='aberto' ORDER BY id DESC LIMIT 3`, id))
+      precisa.push({ tipo: 'retorno', modulo: 'secretaria', quem: quem('secretaria'), titulo: String(r.direcao).startsWith('devo') ? `Retornar ${curto(r.pessoa, 30)}` : `Aguardando ${curto(r.pessoa, 30)}`, detalhe: curto(r.assunto, 70),
+        acoes: [{ rotulo: 'Ver com a Olga', cmd: `Olga, como está o retorno com ${r.pessoa} sobre ${r.assunto}?`, sec: true }] });
+
+    // 2. A equipe já fez (hoje)
+    for (const i of q(`SELECT modulo, entrada, saida, datetime(criado_em,'-3 hours') em FROM interacoes WHERE conta_id=? AND date(criado_em,'-3 hours')=? AND saida IS NOT NULL AND saida<>'' ORDER BY id DESC LIMIT 8`, id, hoje))
+      feito.push({ modulo: i.modulo, quem: quem(i.modulo), titulo: curto(i.entrada || 'Pedido atendido', 80), detalhe: curto(String(i.saida).split(/\n/)[0], 90), hora: (i.em || '').slice(11, 16) });
+    for (const p of q(`SELECT tema, datetime(publicado_em,'-3 hours') em FROM posts WHERE conta_id=? AND status='publicado' AND date(publicado_em,'-3 hours')=?`, id, hoje))
+      feito.push({ modulo: 'social', quem: quem('social'), titulo: `Post publicado: ${curto(p.tema || 'Instagram', 60)}`, detalhe: 'no Instagram', hora: (p.em || '').slice(11, 16) });
+    feito.sort((a, b) => (b.hora || '').localeCompare(a.hora || ''));
+
+    // 3. Ainda hoje
+    try {
+      const gcal = await import('../integracoes/google-calendar.js');
+      const evs = await gcal.listarEventos(id, { inicio: new Date(agora + ':00-03:00').toISOString(), fim: new Date(amanha + 'T00:00:00-03:00').toISOString(), max: 12 });
+      for (const e of evs || []) { const h = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }) : 'dia todo';
+        depois.push({ hora: h, titulo: curto(e.summary || 'Compromisso', 60), detalhe: curto(e.location || '', 60), modulo: 'secretaria', quem: quem('secretaria') }); }
+    } catch {}
+    for (const l of q(`SELECT texto, quando, modulo FROM lembretes WHERE conta_id=? AND enviado=0 AND quando>=? AND quando<? ORDER BY quando LIMIT 8`, id, agora, amanha + 'T00:00'))
+      depois.push({ hora: (l.quando || '').slice(11, 16), titulo: curto(l.texto, 70), detalhe: `${quem(l.modulo || 'secretaria')} vai te lembrar`, modulo: l.modulo || 'secretaria', quem: quem(l.modulo || 'secretaria') });
+    for (const p of q(`SELECT tema, data FROM posts WHERE conta_id=? AND status='agendado' AND data>=? AND data<? ORDER BY data`, id, agora, amanha + 'T00:00'))
+      depois.push({ hora: (p.data || '').slice(11, 16), titulo: `Post vai ao ar: ${curto(p.tema || 'Instagram', 50)}`, detalhe: `${quem('social')} publica sozinha`, modulo: 'social', quem: quem('social') });
+    depois.sort((a, b) => (a.hora === 'dia todo' ? '00:00' : a.hora).localeCompare(b.hora === 'dia todo' ? '00:00' : b.hora));
+
+    let saldo = null;
+    const s = q(`SELECT carteira, saldo, data FROM fin_saldos WHERE conta_id=? ORDER BY data DESC, id DESC LIMIT 1`, id)[0];
+    if (s) saldo = { carteira: s.carteira, valor: s.saldo, texto: brl(s.saldo), data: s.data };
+    const h = Number(agora.slice(11, 13));
+    res.json({ data: hoje, saudacao: h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite', precisa, feito, depois, saldo,
+      total: precisa.length + feito.length + depois.length });
+  });
 }

@@ -67,12 +67,13 @@ async function iniciar() {
   }
   document.querySelectorAll('.atalhos button').forEach(b => b.onclick = () => { enviar(b.dataset.cmd); $('#lateral').classList.remove('aberta'); });
   const nome = (m) => me.personas.find(p => p.modulo === m)?.nome || NOMES[m];
-  $('#equipeAtiva').innerHTML = `<div class="titulo">Equipe ativa</div>` + me.modulos.map(m => `<div class="equipe-item"><span class="dot"></span>${nome(m)} <span style="opacity:.6;font-size:12px">· ${NOMES[m]}</span></div>`).join('');
-  $('#filtros').innerHTML = `<button class="ativo" data-f="">Todos</button>` + me.modulos.map(m => `<button data-f="${m}">${nome(m)}</button>`).join('');
+  $('#equipeAtiva').innerHTML = `<div class="titulo">Sua equipe</div><div class="avs">${me.modulos.map(m => avatar(m, nome(m), NOMES[m])).join('')}</div><div class="mini-n">${me.modulos.length} assessores ativos</div>`;
+  $('#filtros').innerHTML = `<button class="ativo" data-f="">Todos</button>` + me.modulos.map(m => `<button data-f="${m}">${avatar(m, nome(m))}${esc(nome(m))}</button>`).join('');
   $('#filtros').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; filtro = b.dataset.f || null; [...$('#filtros').children].forEach(x => x.classList.toggle('ativo', x === b)); render(); };
   $('#texto').placeholder = `Fale com ${me.modulos.map(nome).slice(0, 4).join(', ')}…`;
   carregarGuia();
-  await carregar(); conectar(); setTimeout(irParaFim, 600); window.addEventListener('resize', () => { if (pertoDoFim($('#lista'))) irParaFim(); });
+  await carregar(); conectar(); setTimeout(irParaFim, 600);
+  if (!location.hash || !window.telas?.[location.hash.slice(1)]) window.mostrarTela?.('hoje'); window.addEventListener('resize', () => { if (pertoDoFim($('#lista'))) irParaFim(); });
 }
 
 // ---------- mensagens ----------
@@ -110,6 +111,8 @@ function acrescentar(m) {
   lista.lastElementChild?.querySelectorAll('img,video').forEach(el => el.addEventListener('load', () => { if (pertoDoFim(lista) || noFim) irParaFim(); }, { once: true }));
 }
 const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** Avatar de assessor: iniciais em círculo, cor por função (sempre com o nome escrito ao lado ou no title). */
+function avatar(mod, nome, papel) { const ini = String(nome || '?').replace(/[^A-Za-zÀ-ú ]/g, '').trim().slice(0, 2).toUpperCase() || '?'; return `<span class="av av-${esc(mod || 'fiel')}" title="${esc(nome)}${papel ? ' · ' + esc(papel) : ''}" aria-hidden="true">${esc(ini)}</span>`; }
 function fmt(t) {
   let s = esc(t);
   s = s.replace(/^\s*#{1,6}\s+(.+)$/gm, '<b>$1</b>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*(?!\s)([^*\n]+?)\*(?!\w)/g, '$1<b>$2</b>').replace(/`([^`\n]+)`/g, '<code>$1</code>');
@@ -137,7 +140,7 @@ function bolha(m, d) {
   else if (m.midia && m.direcao === 'entrada') midia = `<span style="color:var(--mudo)">📎 ${esc(m.midia.nome || m.tipo)} (enviado pelo Telegram)</span>`;
   const botoes = m.botoes ? `<div class="botoes" data-id="${m.id}">${m.botoes.flat().map(b => b.url ? `<a class="bt-link" href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.t)}</a>` : `<button data-d="${esc(b.d ?? b.t)}">${esc(b.t)}</button>`).join('')}</div>` : '';
   const texto = m.texto && !(m.midia && /^\[(imagem|video|arquivo|audio)\]$/.test(m.texto)) ? fmt(m.texto) : '';
-  return `<div class="msg ${m.direcao}" data-id="${m.id}">${nome ? `<div class="mod">${esc(nome)}</div>` : ''}${midia}${texto}${botoes}<div class="meta"><span>${hora}</span><span>${m.direcao === 'entrada' ? (m.canal === 'web' ? '💻 web' : '📱 telegram') : ''}</span></div></div>`;
+  return `<div class="msg ${m.direcao}" data-id="${m.id}">${nome ? `<div class="mod">${avatar(m.modulo, nome)}<span>${esc(nome)}</span></div>` : ''}${midia}${texto}${botoes}<div class="meta"><span>${hora}</span><span>${m.direcao === 'entrada' ? (m.canal === 'web' ? '💻 web' : '📱 telegram') : ''}</span></div></div>`;
 }
 $('#lista').addEventListener('click', (e) => {
   const b = e.target.closest('.botoes button'); if (!b) return;
@@ -232,15 +235,17 @@ $('#gravar').onclick = async () => {
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '');
     rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined); const parts = [];
     rec.ondataavailable = (e) => parts.push(e.data);
-    rec.onstop = async () => { stream.getTracks().forEach(t => t.stop()); const blob = new Blob(parts, { type: rec.mimeType || 'audio/webm' }); rec = null; $('#gravar').classList.remove('gravando'); $('#gravar').textContent = '🎙'; if (blob.size > 1000) await enviar('', new File([blob], blob.type.includes('mp4') ? 'audio.m4a' : 'audio.webm', { type: blob.type })); };
-    rec.start(); $('#gravar').classList.add('gravando'); $('#gravar').textContent = '■';
+    rec.onstop = async () => { stream.getTracks().forEach(t => t.stop()); const blob = new Blob(parts, { type: rec.mimeType || 'audio/webm' }); rec = null; $('#gravar').classList.remove('gravando'); $('#gravar').innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>'; if (blob.size > 1000) await enviar('', new File([blob], blob.type.includes('mp4') ? 'audio.m4a' : 'audio.webm', { type: blob.type })); };
+    rec.start(); $('#gravar').classList.add('gravando'); $('#gravar').innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
   } catch (e) { alert('Não consegui acessar o microfone: ' + e.message); }
 };
 
 // ---------- lateral / atalhos / sair ----------
 $('#abrirLateral').onclick = () => $('#lateral').classList.add('aberta');
 $('#fecharLateral').onclick = () => $('#lateral').classList.remove('aberta');
-document.querySelectorAll('.menu a').forEach(a => a.onclick = () => { window.mostrarTela?.(a.dataset.tela); $('#lateral').classList.remove('aberta'); });
+document.querySelectorAll('.menu a[data-tela], #tabbar a[data-tela]').forEach(a => a.onclick = () => { window.mostrarTela?.(a.dataset.tela); $('#lateral').classList.remove('aberta'); });
+document.querySelector('#tabbar [data-acao="mais"]').onclick = () => $('#lateral').classList.add('aberta');
+document.querySelectorAll('#chips button').forEach(b => b.onclick = () => enviar(b.dataset.cmd));
 $('#sair').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); localStorage.removeItem('akm'); location.reload(); };
 
 // PWA

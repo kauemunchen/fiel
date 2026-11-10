@@ -5,13 +5,65 @@ async function post(url, body) { const r = await api(url, { method: 'POST', head
 async function del(url) { return api(url, { method: 'DELETE' }); }
 const sel = (nome, opcoes, atual) => `<select name="${nome}">${opcoes.map(o => `<option ${o === atual ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
 
+window.telas = telas;
 function mostrarTela(nome) {
   const principal = $('#principal'); const cfg = $('#tela-config');
-  document.querySelectorAll('.menu a').forEach(a => a.classList.toggle('ativo', a.dataset.tela === nome));
-  if (nome === 'conversa') { principal.classList.remove('modo-config'); cfg.classList.add('oculto'); cfg.innerHTML = ''; irParaFim(); return; }
+  document.querySelectorAll('.menu a, #tabbar a').forEach(a => a.classList.toggle('ativo', a.dataset.tela === nome));
+  document.body.dataset.tela = nome;
+  if (nome === 'conversa') { principal.classList.remove('modo-config'); cfg.classList.add('oculto'); cfg.innerHTML = ''; irParaFim(); preencherTrilho(); return; }
+  $('#trilho')?.classList.add('oculto'); $('#app').classList.remove('com-trilho');
   if (!telas[nome]) { toast('Essa tela entra na próxima etapa.'); return; }
-  principal.classList.add('modo-config'); cfg.classList.remove('oculto'); cfg.innerHTML = '<p class="sub">carregando…</p>';
-  telas[nome]().then(html => { cfg.innerHTML = `<h1><button class="icone" id="voltarConversa">☰</button>${html.titulo}</h1><p class="sub">${html.sub || ''}</p>${html.corpo}`; $('#voltarConversa').onclick = () => $('#lateral').classList.add('aberta'); html.depois?.(); });
+  principal.classList.add('modo-config'); cfg.classList.remove('oculto', 'tela-hoje'); cfg.innerHTML = '<p class="sub">carregando…</p>';
+  telas[nome]().then(html => { cfg.innerHTML = `<h1><button class="icone" id="voltarConversa" aria-label="Menu"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>${html.titulo}</h1><p class="sub">${html.sub || ''}</p>${html.corpo}`; $('#voltarConversa').onclick = () => $('#lateral').classList.add('aberta'); html.depois?.(); })
+    .catch(() => { cfg.innerHTML = '<p class="sub">Não consegui carregar agora. Tente de novo em instantes.</p>'; });
+}
+
+// ---------------- HOJE (tela inicial: o dia em sequência) ----------------
+const IC_OK = '<svg class="ic ok" viewBox="0 0 24 24" role="img" aria-label="feito"><path d="M20 6L9 17l-5-5"/></svg>';
+let hojeCache = null;
+async function dadosHoje(forcar) { if (!hojeCache || forcar || Date.now() - hojeCache.t > 60000) hojeCache = { t: Date.now(), d: await api('/api/hoje') }; return hojeCache.d; }
+function acoesHtml(acoes, i) { return (acoes || []).map((a, j) => `<button class="btn-h ${a.sec ? 'sec' : 'pri'}" data-i="${i}" data-j="${j}">${esc(a.rotulo)}</button>`).join(''); }
+function ligarAcoes(raiz, itens) {
+  raiz.querySelectorAll('.btn-h').forEach(b => b.onclick = async () => { const a = itens[b.dataset.i]?.acoes?.[b.dataset.j]; if (!a) return;
+    if (a.copiar) { try { await navigator.clipboard.writeText(a.copiar); toast('Código copiado'); } catch { prompt('Copie o código:', a.copiar); } return; }
+    if (a.tela) return mostrarTela(a.tela);
+    if (a.cmd) { mostrarTela('conversa'); enviar(a.cmd); hojeCache = null; } });
+}
+telas.hoje = async () => {
+  const d = await dadosHoje(true); const nomeDono = (me?.conta?.nome_dono || '').split(' ')[0];
+  const dataTxt = (t => t.charAt(0).toUpperCase() + t.slice(1))(new Date(d.data + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
+  const nFeito = d.feito.length, nPrecisa = d.precisa.length, total = Math.max(1, d.total);
+  const resumo = nFeito || nPrecisa ? `${nFeito ? `A equipe já resolveu ${nFeito} ${nFeito === 1 ? 'coisa' : 'coisas'} hoje.` : 'Nada concluído ainda hoje.'} ${nPrecisa ? `<b>${nPrecisa} ${nPrecisa === 1 ? 'precisa' : 'precisam'} de você.</b>` : '<b>Nada depende de você agora.</b>'}` : 'Dia tranquilo por enquanto. Peça qualquer coisa à equipe.';
+  const barra = Array.from({ length: Math.min(total, 24) }, (_, i) => { const k = i / Math.min(total, 24) * total; return `<i class="${k < nFeito ? 'f' : k < nFeito + nPrecisa ? 'p' : ''}"></i>`; }).join('');
+  const card = (x, i) => `<article class="h-card${x.alerta ? ' alerta' : ''}"><div class="h-ic">${avatar(x.modulo, x.quem)}</div><div class="h-txt"><div class="h-meta"><span class="tag">${esc(x.quem)}</span><span class="${x.alerta ? 'h-alerta' : 'h-sub'}">${esc(x.detalhe || '')}</span></div><b>${esc(x.titulo)}</b></div><div class="h-acoes">${acoesHtml(x.acoes, i)}</div></article>`;
+  const sec = (n, cls, titulo, corpo) => `<section class="h-sec"><h2><span class="h-n ${cls}">${n}</span>${titulo}</h2>${corpo}</section>`;
+  const vazio = (t) => `<p class="h-vazio">${t}</p>`;
+  const ult = (typeof msgs !== 'undefined' ? msgs : []).filter(m => m.texto && !/^\[(imagem|video|arquivo|audio)\]$/.test(m.texto)).slice(-3);
+  const chat = `<aside class="h-chat cartao"><div class="h-chat-topo"><b>Conversa</b><span class="h-sync"><i></i>sincronizada com o Telegram</span></div>
+    <div class="h-msgs">${ult.length ? ult.map(m => `<div class="h-msg ${m.direcao}">${m.direcao === 'saida' ? avatar(m.modulo, (me.personas.find(p => p.modulo === m.modulo)?.nome || NOMES[m.modulo] || 'Fiel')) : ''}<div>${esc(String(m.texto).slice(0, 220))}${String(m.texto).length > 220 ? '…' : ''}</div></div>`).join('') : '<p class="h-vazio">Nenhuma conversa ainda.</p>'}</div>
+    <div class="chips h-chips">${[...document.querySelectorAll('#chips button')].slice(1, 5).map(b => `<button type="button" data-cmd="${esc(b.dataset.cmd)}">${esc(b.textContent)}</button>`).join('')}</div>
+    <form class="h-form" id="hForm"><label for="hTexto" class="so-leitor">Mensagem</label><input id="hTexto" placeholder="Peça qualquer coisa à equipe…" autocomplete="off"><button class="enviar" aria-label="Enviar"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></form></aside>`;
+  const corpo = `<div class="h-prog"><div class="h-prog-t"><span>Progresso do dia</span><b>${nFeito} de ${d.total}</b></div><div class="h-barra">${barra}</div></div>
+  <div class="h-grade"><div class="h-col">
+    ${sec(1, 'n1', 'Precisa de você', nPrecisa ? d.precisa.map(card).join('') : vazio('Tudo em dia. Quando algo depender de você, aparece aqui.'))}
+    ${sec(2, 'n2', 'A equipe já fez', nFeito ? `<div class="cartao h-lista">${d.feito.map(x => `<div class="h-linha">${IC_OK}<div class="h-txt"><span>${esc(x.titulo)}</span><small>${esc(x.quem)} · ${esc(x.detalhe || '')}</small></div><time>${esc(x.hora || '')}</time></div>`).join('')}</div>` : vazio('Assim que a equipe concluir algo hoje, aparece aqui com ✓.'))}
+    ${sec(3, 'n3', 'Ainda hoje', d.depois.length ? `<ol class="h-tempo">${d.depois.map(x => `<li><time>${esc(x.hora)}</time><div><span>${esc(x.titulo)}</span>${x.detalhe ? `<small>${esc(x.detalhe)}</small>` : ''}</div></li>`).join('')}</ol>` : vazio('Nada mais na agenda de hoje.'))}
+    ${d.saldo ? `<p class="h-saldo">Último saldo registrado (${esc(d.saldo.carteira)}): <b>${esc(d.saldo.texto)}</b></p>` : ''}
+  </div>${chat}</div>`;
+  return { titulo: `${esc(d.saudacao)}${nomeDono ? ', ' + esc(nomeDono) : ''}.`, sub: `<span class="h-data">${esc(dataTxt)}</span> ${resumo}`, corpo,
+    depois: () => { const raiz = $('#tela-config'); raiz.classList.add('tela-hoje'); ligarAcoes(raiz, d.precisa);
+      raiz.querySelectorAll('.h-chips button').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); });
+      $('#hForm').onsubmit = (e) => { e.preventDefault(); const t = $('#hTexto').value.trim(); if (!t) return; mostrarTela('conversa'); enviar(t); }; } };
+};
+// Trilho da Conversa (telas largas): pendências + agenda de hoje.
+async function preencherTrilho() {
+  const t = $('#trilho'); if (!t) return; t.classList.remove('oculto'); $('#app').classList.add('com-trilho');
+  try { const d = await dadosHoje();
+    t.innerHTML = `<section><h2>Pendências</h2>${d.precisa.length ? d.precisa.slice(0, 5).map((x, i) => `<div class="t-item${x.alerta ? ' alerta' : ''}"><i></i><div><span>${esc(x.titulo)}</span><small>${esc(x.quem)} · ${esc(x.detalhe || '')}</small><div class="t-acoes">${acoesHtml(x.acoes, i)}</div></div></div>`).join('') : '<p class="h-vazio">Nada pendente.</p>'}</section>
+      <section><h2>Ainda hoje</h2>${d.depois.length ? `<ol class="h-tempo">${d.depois.slice(0, 6).map(x => `<li><time>${esc(x.hora)}</time><div><span>${esc(x.titulo)}</span></div></li>`).join('')}</ol>` : '<p class="h-vazio">Agenda livre.</p>'}</section>
+      <a class="t-ver" data-tela="hoje">Ver o dia completo</a>`;
+    ligarAcoes(t, d.precisa); t.querySelector('.t-ver').onclick = () => mostrarTela('hoje');
+  } catch { t.innerHTML = ''; }
 }
 
 // ---------------- EQUIPE ----------------
