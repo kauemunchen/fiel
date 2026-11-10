@@ -121,7 +121,7 @@ export function rotasDados(app) {
     }
     for (const p of q(`SELECT id, tema, status FROM posts WHERE conta_id=? AND (status='erro' OR (status='rascunho' AND data IS NULL)) ORDER BY id DESC LIMIT 4`, id))
       precisa.push({ tipo: 'post', modulo: 'social', quem: quem('social'), titulo: p.status === 'erro' ? `Post não publicou: ${curto(p.tema || 'sem tema', 50)}` : `Rascunho de post: ${curto(p.tema || 'sem tema', 50)}`,
-        detalhe: p.status === 'erro' ? 'precisa tentar de novo' : 'escolha a data para publicar', alerta: p.status === 'erro', acoes: [{ rotulo: 'Abrir no calendário', tela: 'editorial' }] });
+        detalhe: p.status === 'erro' ? 'precisa tentar de novo' : 'escolha a data para publicar', alerta: p.status === 'erro', acoes: [{ rotulo: 'Abrir no calendário', tela: 'editorial' }, { rotulo: 'Descartar', excluir: `/api/editorial/${p.id}`, sec: true }] });
     for (const t of q(`SELECT titulo, prazo FROM tarefas WHERE conta_id=? AND status='aberta' AND prazo IS NOT NULL AND prazo<=? ORDER BY prazo LIMIT 4`, id, hoje))
       precisa.push({ tipo: 'tarefa', modulo: 'secretaria', quem: quem('secretaria'), titulo: curto(t.titulo, 70), detalhe: t.prazo < hoje ? 'tarefa atrasada' : 'prazo hoje', alerta: t.prazo < hoje,
         acoes: [{ rotulo: 'Concluir', cmd: `Olga, marca como concluída a tarefa "${t.titulo}".` }] });

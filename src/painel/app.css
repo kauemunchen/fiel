@@ -677,3 +677,5 @@ body[data-tela="conversa"] #app.com-trilho{grid-template-columns:256px minmax(0,
 .fin-tab td:not(:first-child),.fin-tab th:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}
 .fin-vazio{max-width:620px}
 @media (max-width:860px){.fin-kpis{grid-template-columns:1fr 1fr;gap:8px}.fin-kpi{padding:12px 14px}.fin-kpi.destaque{grid-column:1/-1}.fin-kpi .r{font-size:12px}.fin-kpi small{font-size:11.5px}.fin-lin{flex-wrap:wrap}.fin-lin .h-txt{flex:1 1 60%}.fin-kpi b{font-size:17px}.fin-kpi.destaque b{font-size:26px}}
+
+.btn-h.perigo{background:var(--erro)!important;color:#fff!important}
