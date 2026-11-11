@@ -749,3 +749,9 @@ body[data-tela="conversa"] #app.com-trilho{grid-template-columns:256px minmax(0,
 .cf-resumo{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:4px 0 6px}
 .cf-resumo>div{display:flex;flex-direction:column;gap:2px;padding:12px;border-radius:12px;background:var(--papel)}
 .cf-resumo span{font-size:12px;color:var(--tinta-mid)}.cf-resumo b{font-size:18px;font-variant-numeric:tabular-nums}.cf-resumo small{font-size:12px;color:var(--tinta-mid)}
+
+.es-box{margin-bottom:12px;display:flex;flex-direction:column;gap:4px}.es-box h3{font-size:16px!important;margin:0 0 4px!important}
+.es-it{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--linha);cursor:pointer}.es-it input{margin-top:4px;width:18px;height:18px;flex:none}
+.es-it small{color:var(--tinta-mid)}.es-c{font-size:14px;color:var(--tinta-mid);margin-top:2px}.es-c s{opacity:.7}.es-c b{color:var(--tinta)}
+.es-err h3{color:#B3261E}
+.es-aviso{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;border-color:var(--coral)}

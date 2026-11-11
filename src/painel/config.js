@@ -513,7 +513,7 @@ telas.financeiro = async () => {
       <label class="fin-sel"><span>Visualizar</span><select id="finCart"><option value="">Geral · todas as carteiras</option>${optCart(false) ? `<optgroup label="Empresas (PJ)">${optCart(false)}</optgroup>` : ''}${optCart(true) ? `<optgroup label="Pessoa física (PF)">${optCart(true)}</optgroup>` : ''}</select></label>
       ${d.carteira && d.contas_carteira?.length ? `<label class="fin-sel"><span>Conta</span><select id="finConta"><option value="">Todas as contas</option>${d.contas_carteira.map(x => `<option value="${x.id}" ${d.conta_sel?.id === x.id ? 'selected' : ''}>${esc(x.rotulo)}</option>`).join('')}</select></label>` : ''}
     </div>
-    <div class="fin-dir"><button type="button" class="chip-link" id="finPlanilha">Planilha no Drive</button><button type="button" class="chip-link" id="finContas">Contas e cartões</button><button type="button" class="chip-link" id="finPlano">Plano de contas</button><label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div></div>`;
+    <div class="fin-dir"><button type="button" class="chip-link" id="finPlanilha">Planilha no Drive</button><button type="button" class="chip-link" id="finImportar" hidden>Atualizar pela planilha</button><button type="button" class="chip-link" id="finContas">Contas e cartões</button><button type="button" class="chip-link" id="finPlano">Plano de contas</button><label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div></div>`;
   if (d.vazio && !d.carteira) return { titulo: 'Financeiro', sub: `Painel gerencial da ${esc(nomeTina)}`, corpo: `<div class="cartao fin-vazio"><h3>Seu financeiro aparece aqui</h3><p class="d">Mande o extrato do banco (OFX ou CSV), uma foto de boleto ou nota, ou conte à ${esc(nomeTina)} o saldo atual. Ela organiza tudo e este painel se monta sozinho.</p><div class="h-acoes"><button class="btn-h pri" data-cmd="${esc(nomeTina)}, quero mandar o extrato do banco">Mandar extrato</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero informar o saldo atual da conta">Informar saldo</button></div></div>`,
     depois: () => document.querySelectorAll('.fin-vazio [data-cmd]').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); }) };
   const a = d.mes_atual, p = d.mes_anterior, delta = a.resultado - p.resultado;
@@ -550,6 +550,9 @@ telas.financeiro = async () => {
       const r = st.ativo ? (post('/api/fin/espelho', {}).catch(() => {}), st) : await post('/api/fin/espelho', {}).catch(() => null);
       b.disabled = false; b.textContent = 'Planilha no Drive';
       if (r?.link) { if (w) w.location = r.link; else window.open(r.link, '_blank'); toast(st.ativo ? 'Abrindo a planilha (atualizando agora)' : 'Planilha criada no seu Drive'); } else if (w) w.close(); };
+    $('#finImportar').onclick = () => mostrarTela('espelho');
+    api('/api/fin/espelho').then(st => { if (!st?.ativo) return; $('#finImportar') && ($('#finImportar').hidden = false);
+      if (st.alterada && $('.fin-filtros')) $('.fin-filtros').insertAdjacentHTML('afterend', `<div class="cartao es-aviso"><b>Você alterou a planilha do Drive.</b> Ela fica pausada até você revisar. <button class="btn-h pri" id="esIr">Revisar e aplicar</button></div>`), $('#esIr').onclick = () => mostrarTela('espelho'); }).catch(() => {});
     $('#finContas').onclick = () => { cfEstado.carteira = finEstado.carteira || ''; mostrarTela('contasfin'); };
     $('#finPlano').onclick = () => { planoEstado.carteira = finEstado.carteira || ''; mostrarTela('plano'); };
     $('#finMes').onchange = (e) => { finEstado.mes = e.target.value; mostrarTela('financeiro'); };
@@ -697,3 +700,27 @@ function ligarNovaCarteira() {
   $('#tela-config')?.classList.add('tela-fin');
   $('#ncAdd') && ($('#ncAdd').onclick = async () => { const nome = $('#ncNome').value.trim(); const r = await pp('/api/fin/carteiras', { acao: 'adicionar', nome, tipo: $('#ncTipo').value, titular: $('#ncTit').value }); if (!r?.erro) { cfEstado.carteira = nome; toast('Carteira criada'); mostrarTela('contasfin'); } });
 }
+
+// ---------------- ATUALIZAR PELA PLANILHA (espelho → Fiel, com revisão) ----------------
+telas.espelho = async () => {
+  const d = await api('/api/fin/espelho/alteracoes').catch(e => ({ erro: e.message || 'Não consegui ler a planilha.' }));
+  const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const fv = (c, v) => c === 'valor' ? brl(v) : /data|vencimento/.test(c) && v ? String(v).split('-').reverse().join('/') : esc(String(v ?? '')) || '—';
+  const sub = 'Confira o que você mudou na planilha "Espelho financeiro" e escolha o que vai para o Fiel. Nada muda sem você aplicar.';
+  if (d.erro) return { titulo: 'Atualizar pela planilha', sub, corpo: `<div class="cartao"><p class="d">${esc(d.erro)}</p></div>` };
+  if (!d.total && !d.erros.length) return { titulo: 'Atualizar pela planilha', sub, corpo: `<div class="cartao"><h3>Tudo igual</h3><p class="d">A planilha está igual ao Fiel. Edite a aba Lançamentos (ou acrescente linhas sem ID) e volte aqui.</p></div>` };
+  const corpo = `
+    ${d.mudancas.length ? `<section class="cartao es-box"><h3>Alterados (${d.mudancas.length})</h3>${d.mudancas.map(m => `<label class="es-it"><input type="checkbox" class="es-m" value="${m.id}" checked><div><b>${esc(m.descricao)}</b> <small>linha ${m.linha} · #${m.id}</small>${m.campos.map(c => `<div class="es-c">${esc(c.rotulo)}: <s>${fv(c.campo, c.de)}</s> → <b>${fv(c.campo, c.para)}</b></div>`).join('')}</div></label>`).join('')}</section>` : ''}
+    ${d.novos.length ? `<section class="cartao es-box"><h3>Novos (${d.novos.length})</h3>${d.novos.map(n => `<label class="es-it"><input type="checkbox" class="es-n" value="${n.linha}" checked><div><b>${esc(n.descricao)}</b> <small>linha ${n.linha}</small><div class="es-c">${n.alvo.tipo === 'entrada' ? 'Entrada' : 'Saída'} · ${brl(n.alvo.valor)} · ${esc(n.alvo.carteira)} · ${esc(n.alvo.status)}</div></div></label>`).join('')}</section>` : ''}
+    ${d.removidos.length ? `<section class="cartao es-box"><h3>Apagados na planilha (${d.removidos.length})</h3><p class="d">Marque só o que deve sair do Fiel. Os não marcados voltam para a planilha.</p>${d.removidos.map(r => `<label class="es-it"><input type="checkbox" class="es-r" value="${r.id}"><div><b>${esc(r.descricao || 'Lançamento')}</b> <small>#${r.id}</small><div class="es-c">${r.tipo === 'entrada' ? 'Entrada' : 'Saída'} · ${brl(r.valor)} · ${esc(r.carteira)}</div></div></label>`).join('')}</section>` : ''}
+    ${d.erros.length ? `<section class="cartao es-box es-err"><h3>Com erro (${d.erros.length}) · não serão aplicados</h3>${d.erros.map(e => `<div class="es-it"><div><b>Linha ${e.linha}${e.descricao ? ' · ' + esc(e.descricao) : ''}</b>${e.erros.map(x => `<div class="es-c">${esc(x)}</div>`).join('')}</div></div>`).join('')}</section>` : ''}
+    <div class="h-acoes"><button class="btn-h pri" id="esAplicar">Aplicar selecionados</button><button class="btn-h sec" id="esDescartar">Descartar e voltar a planilha ao Fiel</button></div>`;
+  return { titulo: 'Atualizar pela planilha', sub, corpo, depois: () => {
+    $('#tela-config').classList.add('tela-fin');
+    const marc = (cls) => [...document.querySelectorAll(cls + ':checked')].map(i => Number(i.value));
+    $('#esAplicar').onclick = async (e) => { e.currentTarget.disabled = true; const r = await pp('/api/fin/espelho/aplicar', { ids: marc('.es-m'), novos: marc('.es-n'), remover: marc('.es-r') });
+      if (!r?.erro) { toast(`Feito: ${r.alterados} alterados, ${r.criados} novos, ${r.removidos} removidos`); finEstado.conta = ''; mostrarTela('financeiro'); } else e.currentTarget.disabled = false; };
+    $('#esDescartar').onclick = async (e) => { const b = e.currentTarget; if (!b.dataset.conf) { b.dataset.conf = 1; b.textContent = 'Confirmar: a planilha volta a ficar igual ao Fiel'; b.classList.add('perigo'); return; }
+      const r = await pp('/api/fin/espelho/descartar', {}); if (!r?.erro) { toast('Planilha restaurada'); mostrarTela('financeiro'); } };
+  } };
+};

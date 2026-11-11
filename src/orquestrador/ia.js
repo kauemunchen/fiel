@@ -190,6 +190,7 @@ export function descreverAcao(c, contaId) {
       let l = null; try { l = db.prepare('SELECT tipo, valor, descricao, carteira, status, COALESCE(vencimento, pago_em, data) d FROM fin_lancamentos WHERE id=? AND conta_id=?').get(Number(a.id), contaId); } catch {}
       if (!l) return `apagar o lançamento #${a.id} (não encontrado — nada será apagado)`;
       return `APAGAR ${l.tipo === 'entrada' ? 'a entrada' : 'a saída'} "${l.descricao}" de R$ ${Number(l.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${l.carteira}, ${l.status === 'pago' ? 'paga' : 'em aberto'}, ${String(l.d || '').split('-').reverse().join('/')}) — não dá para desfazer`; }
+    case 'aplicar_alteracoes_planilha': return `atualizar o financeiro com as alterações da planilha espelho${a.ids?.length ? ` (lançamentos ${a.ids.join(', ')})` : ' (todas as alteradas e as linhas novas)'}${a.remover_ids?.length ? ` e remover ${a.remover_ids.length} lançamento(s)` : ''}`;
     case 'criar_cobranca': return `criar cobrança de ${a.valor || ''} para ${a.cliente || ''}`;
     case 'encerrar_vigencia': return `encerrar a vigência #${a.vigencia_id}${a.nova_data ? ` e registrar nova até ${a.nova_data}` : ''}`;
     case 'remover_midia': return `remover a mídia #${a.id} da biblioteca (não volta)`;
