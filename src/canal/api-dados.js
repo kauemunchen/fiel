@@ -204,14 +204,63 @@ export function rotasDados(app) {
     // Últimos 6 meses
     const meses = []; let m = mes; for (let k = 0; k < 6; k++) { meses.unshift(m); m = mesAnt(m); }
     const historico = meses.map(mm => ({ mes: mm, ...totMes(mm) }));
-    const categorias = db.prepare(`SELECT COALESCE(categoria,'Sem categoria') categoria, SUM(valor) total FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 AND tipo='saida' ${semTransf} AND substr(${efet},1,7)=? GROUP BY 1 ORDER BY total DESC LIMIT 6`).all(id, ...ca, mes).map(c => ({ categoria: c.categoria, total: r2(c.total) }));
+    const PLm = await import('../ferramentas/plano-contas.js'); const usaPlano = cart && PLm.planoAtivo(id, cart);
+    const categorias = db.prepare(`SELECT ${usaPlano ? "COALESCE(subcategoria, categoria, 'Sem conta')" : "COALESCE(categoria,'Sem categoria')"} categoria, SUM(valor) total FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 AND tipo='saida' ${semTransf} AND substr(${efet},1,7)=? GROUP BY 1 ORDER BY total DESC LIMIT 6`).all(id, ...ca, mes).map(c => ({ categoria: c.categoria, total: r2(c.total) }));
     const ultimos = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, categoria, ${efet} quando FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 ORDER BY ${efet} DESC, id DESC LIMIT 10`).all(id, ...ca);
-    res.json({ hoje, mes, carteira: cart, carteiras: todas, vazio: !prev.length && !ultimos.length && !saldos.some(s => s.tem_saldo_inicial),
+    res.json({ hoje, mes, carteira: cart, carteiras: todas, usa_plano: !!usaPlano, vazio: !prev.length && !ultimos.length && !saldos.some(s => s.tem_saldo_inicial),
       saldo: { hoje: saldoHoje, por_carteira: saldos.map(s => ({ carteira: s.carteira, saldo: s.saldo, base: s.base })) },
       mes_atual: atual, mes_anterior: { mes: mesAnt(mes), ...anterior },
       abertos: { a_receber_30: somaT(p30, 'entrada'), a_pagar_30: somaT(p30, 'saida'), atrasado_receber: somaT(atras, 'entrada'), atrasado_pagar: somaT(atras, 'saida'), n_atrasados: atras.length },
       previsao: { d30: proj(30), d60: proj(60), d90: proj(90), menor: minimo, serie },
       historico, categorias, ultimos,
       vencimentos: prev.filter(p => p.venc <= soma(hoje, 30)).slice(0, 12).map(p => ({ ...p, atrasado: p.venc < hoje, hoje: p.venc === hoje })) });
+  });
+
+  // ---------- Plano de contas (opcional, por carteira) ----------
+  const carteirasConta = async (id) => { const F = await import('../ferramentas/financeiro.js'); F.prepararFinanceiro();
+    return [...new Set([...F.carteirasDe(id), ...db.prepare('SELECT DISTINCT carteira FROM fin_lancamentos WHERE conta_id=? AND oculto=0').all(id).map(r => r.carteira)])].filter(Boolean); };
+  app.get('/api/plano', auth, async (req, res) => {
+    const PL = await import('../ferramentas/plano-contas.js'); const id = req.contaId;
+    const carteiras = (await carteirasConta(id)).map(c => { const cfg = PL.cfgPlano(id, c);
+      const uso = Object.fromEntries(db.prepare('SELECT subcategoria, COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND carteira=? AND oculto=0 AND subcategoria IS NOT NULL GROUP BY 1').all(id, c).map(r => [r.subcategoria, r.n]));
+      return { carteira: c, ativo: !!cfg?.ativo, modelo: cfg?.modelo || null, contas: PL.contasPlano(id, c, { todas: true }).map(x => ({ ...x, usos: uso[PL.rotulo(x)] || 0 })) }; });
+    res.json({ carteiras, modelos: Object.entries(PL.MODELOS).map(([k, v]) => ({ id: k, nome: v.nome, contas: v.contas.length })), grupos: { empresa: PL.GRUPOS_PJ, pessoal: PL.GRUPOS_PF } });
+  });
+  app.post('/api/plano/cfg', auth, async (req, res) => {
+    const PL = await import('../ferramentas/plano-contas.js'); const id = req.contaId; const b = req.body || {};
+    if (!(await carteirasConta(id)).includes(b.carteira)) return res.status(400).json({ erro: 'carteira não encontrada' });
+    try {
+      if (b.modelo) PL.aplicarModelo(id, b.carteira, b.modelo, { substituir: !!b.substituir });
+      if (b.ativo !== undefined) { if (b.ativo && !PL.contasPlano(id, b.carteira, { todas: true }).length) return res.status(400).json({ erro: 'escolha um modelo para começar' }); PL.definirAtivo(id, b.carteira, !!b.ativo); }
+      res.json({ ok: true });
+    } catch (e) { res.status(400).json({ erro: e.message }); }
+  });
+  app.post('/api/plano/conta', auth, async (req, res) => {
+    const PL = await import('../ferramentas/plano-contas.js'); const id = req.contaId; const b = req.body || {};
+    const nome = String(b.nome || '').trim().slice(0, 80), codigo = String(b.codigo || '').trim().slice(0, 12);
+    if (!nome || !/^\d+(\.\d+)*$/.test(codigo)) return res.status(400).json({ erro: 'informe código (ex.: 3.10) e nome' });
+    if (!['entrada', 'saida'].includes(b.tipo)) return res.status(400).json({ erro: 'tipo inválido' });
+    if (![...PL.GRUPOS_PJ, ...PL.GRUPOS_PF].includes(b.grupo)) return res.status(400).json({ erro: 'grupo do DRE inválido' });
+    if (b.id) {
+      const atual = db.prepare('SELECT * FROM fin_plano WHERE id=? AND conta_id=?').get(Number(b.id), id); if (!atual) return res.status(404).json({ erro: 'conta não existe' });
+      if (db.prepare('SELECT 1 FROM fin_plano WHERE conta_id=? AND carteira=? AND codigo=? AND id<>?').get(id, atual.carteira, codigo, atual.id)) return res.status(400).json({ erro: `o código ${codigo} já existe` });
+      db.prepare('UPDATE fin_plano SET codigo=?, nome=?, tipo=?, grupo=?, ativo=? WHERE id=?').run(codigo, nome, b.tipo, b.grupo, b.ativo === false ? 0 : 1, atual.id);
+      // Renomeou? Os lançamentos já classificados acompanham o novo nome.
+      const antigo = PL.rotulo(atual), novo = `${codigo} ${nome}`;
+      if (antigo !== novo || atual.grupo !== b.grupo) db.prepare('UPDATE fin_lancamentos SET subcategoria=?, categoria=? WHERE conta_id=? AND carteira=? AND subcategoria=?').run(novo, b.grupo, id, atual.carteira, antigo);
+      return res.json({ ok: true, id: atual.id });
+    }
+    if (!(await carteirasConta(id)).includes(b.carteira)) return res.status(400).json({ erro: 'carteira não encontrada' });
+    if (db.prepare('SELECT 1 FROM fin_plano WHERE conta_id=? AND carteira=? AND codigo=?').get(id, b.carteira, codigo)) return res.status(400).json({ erro: `o código ${codigo} já existe` });
+    const ordem = (db.prepare('SELECT MAX(ordem) m FROM fin_plano WHERE conta_id=? AND carteira=?').get(id, b.carteira).m || 0) + 1;
+    const r = db.prepare('INSERT INTO fin_plano (conta_id, carteira, codigo, nome, tipo, grupo, ordem) VALUES (?,?,?,?,?,?,?)').run(id, b.carteira, codigo, nome, b.tipo, b.grupo, ordem);
+    res.json({ ok: true, id: Number(r.lastInsertRowid) });
+  });
+  app.delete('/api/plano/conta/:id', auth, async (req, res) => {
+    const PL = await import('../ferramentas/plano-contas.js'); const id = req.contaId;
+    const c = db.prepare('SELECT * FROM fin_plano WHERE id=? AND conta_id=?').get(Number(req.params.id), id); if (!c) return res.status(404).json({ erro: 'conta não existe' });
+    const usos = db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND carteira=? AND subcategoria=?').get(id, c.carteira, PL.rotulo(c)).n;
+    if (usos) { db.prepare('UPDATE fin_plano SET ativo=0 WHERE id=?').run(c.id); return res.json({ ok: true, desativada: true, usos }); }
+    db.prepare('DELETE FROM fin_plano WHERE id=?').run(c.id); res.json({ ok: true, removida: true });
   });
 }

@@ -508,7 +508,7 @@ telas.financeiro = async () => {
   const d = await api('/api/financeiro/painel?' + q); const nomeTina = me?.personas?.find(p => p.modulo === 'financeiro')?.nome || 'Tina';
   const meses = []; { let m = d.hoje.slice(0, 7); for (let k = 0; k < 12; k++) { meses.push(m); const [a, b] = m.split('-').map(Number); m = b === 1 ? `${a - 1}-12` : `${a}-${String(b - 1).padStart(2, '0')}`; } }
   const filtros = `<div class="fin-filtros"><div class="chips fin-chips" role="group" aria-label="Carteira">${['', ...d.carteiras].map(c => `<button type="button" data-cart="${esc(c)}" class="${(d.carteira || '') === c ? 'on' : ''}">${c ? esc(c) : 'Todas as carteiras'}</button>`).join('')}</div>
-    <label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div>`;
+    <div class="fin-dir"><button type="button" class="chip-link" id="finPlano">Plano de contas</button><label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div></div>`;
   if (d.vazio) return { titulo: 'Financeiro', sub: `Painel gerencial da ${esc(nomeTina)}`, corpo: `<div class="cartao fin-vazio"><h3>Seu financeiro aparece aqui</h3><p class="d">Mande o extrato do banco (OFX ou CSV), uma foto de boleto ou nota, ou conte à ${esc(nomeTina)} o saldo atual. Ela organiza tudo e este painel se monta sozinho.</p><div class="h-acoes"><button class="btn-h pri" data-cmd="${esc(nomeTina)}, quero mandar o extrato do banco">Mandar extrato</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero informar o saldo atual da conta">Informar saldo</button></div></div>`,
     depois: () => document.querySelectorAll('.fin-vazio [data-cmd]').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); }) };
   const a = d.mes_atual, p = d.mes_anterior, delta = a.resultado - p.resultado;
@@ -531,14 +531,69 @@ telas.financeiro = async () => {
     <section class="cartao fin-box"><h3>Previsão de saldo · 90 dias</h3><p class="d">Saldo de hoje somado às contas a receber e a pagar já lançadas.</p>${graficoPrevisao(d.previsao.serie)}${tabela(['Quando', 'Saldo previsto'], [['Hoje', brlF(d.previsao.serie[0].v)], ['Em 30 dias', brlF(d.previsao.d30)], ['Em 60 dias', brlF(d.previsao.d60)], ['Em 90 dias', brlF(d.previsao.d90)], ['Menor saldo', `${brlF(d.previsao.menor.valor)} (${dataBR(d.previsao.menor.dia)})`]])}</section>
     <section class="cartao fin-box"><h3>Recebido x pago · 6 meses</h3><div class="fin-leg"><span><i class="ent"></i>Recebido</span><span><i class="sai"></i>Pago</span></div>${graficoMeses(d.historico)}${tabela(['Mês', 'Recebido', 'Pago', 'Resultado'], d.historico.map(h => [mesNome(h.mes), brlF(h.recebido), brlF(h.pago), brlF(h.resultado, true)]))}</section>
     <section class="cartao fin-box"><h3>A vencer · 30 dias${d.abertos.n_atrasados ? ` <span class="tag off">${d.abertos.n_atrasados} em atraso</span>` : ''}</h3>${venc}</section>
-    <section class="cartao fin-box"><h3>Despesas de ${mesNome(d.mes)} por categoria</h3>${cats}</section>
+    <section class="cartao fin-box"><h3>Despesas de ${mesNome(d.mes)} por ${d.usa_plano ? 'conta do plano' : 'categoria'}</h3>${cats}</section>
     <section class="cartao fin-box largo"><h3>Últimos lançamentos</h3>${ult}<div class="h-acoes" style="margin-top:12px"><button class="btn-h sec" data-cmd="${esc(nomeTina)}, me manda o DRE de ${mesLongo(d.mes)}">Pedir DRE do mês</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero lançar uma conta">Lançar conta</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero mandar o extrato do banco">Mandar extrato</button></div></section>
   </div>`;
   return { titulo: 'Financeiro', sub: `Painel gerencial da ${esc(nomeTina)} · ${mesLongo(d.mes)}`, corpo, depois: () => {
     const raiz = $('#tela-config'); raiz.classList.add('tela-fin'); ligarGraficos(raiz);
     raiz.querySelectorAll('[data-cart]').forEach(b => b.onclick = () => { finEstado.carteira = b.dataset.cart; mostrarTela('financeiro'); });
+    $('#finPlano').onclick = () => { planoEstado.carteira = finEstado.carteira || ''; mostrarTela('plano'); };
     $('#finMes').onchange = (e) => { finEstado.mes = e.target.value; mostrarTela('financeiro'); };
     raiz.querySelectorAll('.fin-bx').forEach(b => b.onclick = () => { const v = d.vencimentos[b.dataset.i]; mostrarTela('conversa'); enviar(`${nomeTina}, ${v.tipo === 'entrada' ? 'recebi' : 'paguei'}: ${v.descricao || v.contraparte} (${brlF(v.valor)}, ${v.carteira}).`); });
     raiz.querySelectorAll('.fin-box [data-cmd]').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); });
+  } };
+};
+
+// ---------------- PLANO DE CONTAS (opcional, por carteira) ----------------
+const planoEstado = { carteira: '' };
+const pp = (u, b) => post(u, b).catch(() => ({ erro: true })); // post já mostra o erro em toast
+telas.plano = async () => {
+  const d = await api('/api/plano');
+  if (!d.carteiras?.length) return { titulo: 'Plano de contas', sub: 'Opcional, por carteira.', corpo: `<div class="cartao"><p class="d">Ainda não há carteiras. Diga à Tina quais são (ex.: "Tina, minhas carteiras são Empresa e Pessoal") e volte aqui.</p></div>` };
+  const sel = d.carteiras.find(c => c.carteira === planoEstado.carteira) || d.carteiras[0]; planoEstado.carteira = sel.carteira;
+  const ehPF = /pessoal|\bpf\b|casa|fam[ií]lia|particular/i.test(sel.carteira);
+  const grupos = ehPF ? d.grupos.pessoal : d.grupos.empresa; const todosGrupos = [...new Set([...grupos, ...sel.contas.map(c => c.grupo)])];
+  const chips = `<div class="chips fin-chips" role="group" aria-label="Carteira">${d.carteiras.map(c => `<button type="button" data-pc="${esc(c.carteira)}" class="${c.carteira === sel.carteira ? 'on' : ''}">${esc(c.carteira)}${c.ativo ? ' ✓' : ''}</button>`).join('')}</div>`;
+  const opcModelo = (atual) => d.modelos.map(m => `<option value="${m.id}" ${m.id === atual ? 'selected' : ''}>${esc(m.nome)} · ${m.contas} contas</option>`).join('');
+  let corpo = chips;
+  if (!sel.contas.length) {
+    const sugerido = ehPF ? 'pessoal' : 'empresa';
+    corpo += `<div class="cartao pc-inicio"><h3>Usar plano de contas em ${esc(sel.carteira)}?</h3><p class="d">Com o plano ligado, a Tina classifica cada lançamento numa conta (ex.: "3.4 Energia, água e internet") e o painel mostra as despesas por conta. Escolha um modelo para começar; depois você renomeia, cria ou desativa contas aqui.</p>
+      <div class="pc-modelos">${d.modelos.map(m => `<button type="button" class="pc-modelo${m.id === sugerido ? ' sugerido' : ''}" data-modelo="${m.id}"><b>${esc(m.nome)}</b><small>${m.contas} contas prontas${m.id === sugerido ? ' · sugerido' : ''}</small></button>`).join('')}</div></div>`;
+  } else {
+    const porGrupo = todosGrupos.map(g => ({ g, contas: sel.contas.filter(c => c.grupo === g) })).filter(x => x.contas.length);
+    const linha = (c) => `<div class="pc-lin${c.ativo ? '' : ' off'}" data-id="${c.id}">
+      <label class="so-leitor" for="pcc${c.id}">Código</label><input id="pcc${c.id}" class="pc-cod" value="${esc(c.codigo)}" inputmode="decimal">
+      <label class="so-leitor" for="pcn${c.id}">Nome</label><input id="pcn${c.id}" class="pc-nome" value="${esc(c.nome)}">
+      <label class="so-leitor" for="pct${c.id}">Tipo</label><select id="pct${c.id}" class="pc-tipo"><option value="entrada" ${c.tipo === 'entrada' ? 'selected' : ''}>Entrada</option><option value="saida" ${c.tipo === 'saida' ? 'selected' : ''}>Saída</option></select>
+      <label class="so-leitor" for="pcg${c.id}">Grupo do DRE</label><select id="pcg${c.id}" class="pc-grupo">${todosGrupos.map(g => `<option ${g === c.grupo ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
+      <label class="pc-ativo"><input type="checkbox" class="pc-on" ${c.ativo ? 'checked' : ''}> ativa</label>
+      <span class="pc-usos">${c.usos ? `${c.usos} lanç.` : ''}</span>
+      <button type="button" class="icone pc-del" aria-label="Remover conta ${esc(c.codigo)}" title="${c.usos ? 'Tem lançamentos: será só desativada' : 'Remover'}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></div>`;
+    corpo += `<div class="cartao pc-topo"><label class="pc-switch"><input type="checkbox" id="pcAtivo" ${sel.ativo ? 'checked' : ''}><span></span><b>Usar plano de contas em ${esc(sel.carteira)}</b></label>
+        <p class="d">${sel.ativo ? 'Ligado: a Tina classifica cada lançamento desta carteira numa conta abaixo.' : 'Desligado: a Tina usa só as categorias gerenciais. Suas contas ficam guardadas.'}</p>
+        <div class="pc-trocar"><label for="pcModelo">Modelo</label><select id="pcModelo">${opcModelo(sel.modelo)}</select><button type="button" class="btn-h sec" id="pcTrocar">Recomeçar com este modelo</button></div></div>
+      ${porGrupo.map(x => `<section class="cartao pc-grupo-box"><h3>${esc(x.g)}</h3>${x.contas.map(linha).join('')}</section>`).join('')}
+      <section class="cartao pc-nova"><h3>Nova conta</h3><div class="pc-lin">
+        <label class="so-leitor" for="pnCod">Código</label><input id="pnCod" class="pc-cod" placeholder="3.10" inputmode="decimal">
+        <label class="so-leitor" for="pnNome">Nome</label><input id="pnNome" class="pc-nome" placeholder="Nome da conta">
+        <label class="so-leitor" for="pnTipo">Tipo</label><select id="pnTipo" class="pc-tipo"><option value="saida">Saída</option><option value="entrada">Entrada</option></select>
+        <label class="so-leitor" for="pnGrupo">Grupo do DRE</label><select id="pnGrupo" class="pc-grupo">${todosGrupos.map(g => `<option>${esc(g)}</option>`).join('')}</select>
+        <button type="button" class="btn-h pri" id="pnAdd">Adicionar</button></div></section>`;
+  }
+  return { titulo: 'Plano de contas', sub: 'Opcional, por carteira. A Tina classifica cada lançamento na conta certa e o DRE continua funcionando.', corpo, depois: () => {
+    const raiz = $('#tela-config'); raiz.classList.add('tela-fin');
+    raiz.querySelectorAll('[data-pc]').forEach(b => b.onclick = () => { planoEstado.carteira = b.dataset.pc; mostrarTela('plano'); });
+    raiz.querySelectorAll('[data-modelo]').forEach(b => b.onclick = async () => { b.disabled = true; const r = await pp('/api/plano/cfg', { carteira: sel.carteira, modelo: b.dataset.modelo }); if (!r?.erro) { toast('Plano de contas ligado'); mostrarTela('plano'); } else b.disabled = false; });
+    $('#pcAtivo') && ($('#pcAtivo').onchange = async (e) => { const r = await pp('/api/plano/cfg', { carteira: sel.carteira, ativo: e.target.checked }); if (!r?.erro) { toast(e.target.checked ? 'Plano ligado' : 'Plano desligado'); mostrarTela('plano'); } });
+    $('#pcTrocar') && ($('#pcTrocar').onclick = async (e) => { const b = e.currentTarget; if (!b.dataset.conf) { b.dataset.conf = 1; b.textContent = 'Confirmar: substitui as contas atuais'; b.classList.add('perigo'); return; }
+      const r = await pp('/api/plano/cfg', { carteira: sel.carteira, modelo: $('#pcModelo').value, substituir: true }); if (!r?.erro) { toast('Modelo aplicado'); mostrarTela('plano'); } });
+    raiz.querySelectorAll('.pc-grupo-box .pc-lin').forEach(l => {
+      const salvar = async () => { const r = await pp('/api/plano/conta', { id: l.dataset.id, codigo: l.querySelector('.pc-cod').value, nome: l.querySelector('.pc-nome').value, tipo: l.querySelector('.pc-tipo').value, grupo: l.querySelector('.pc-grupo').value, ativo: l.querySelector('.pc-on').checked });
+        if (!r?.erro) { toast('Salvo'); l.classList.toggle('off', !l.querySelector('.pc-on').checked); } };
+      l.querySelectorAll('input, select').forEach(i => i.addEventListener('change', salvar));
+      l.querySelector('.pc-del').onclick = async () => { const r = await del('/api/plano/conta/' + l.dataset.id); if (r?.erro) return toast(r.erro); toast(r.desativada ? `Conta desativada (tem ${r.usos} lançamentos)` : 'Conta removida'); mostrarTela('plano'); };
+    });
+    $('#pnAdd') && ($('#pnAdd').onclick = async () => { const r = await pp('/api/plano/conta', { carteira: sel.carteira, codigo: $('#pnCod').value, nome: $('#pnNome').value, tipo: $('#pnTipo').value, grupo: $('#pnGrupo').value }); if (!r?.erro) { toast('Conta criada'); mostrarTela('plano'); } });
   } };
 };

@@ -3,6 +3,7 @@
 // REGRAS DURAS (validadas aqui): nunca movimenta dinheiro; todo lançamento tem carteira; baixa só com comprovante ou extrato.
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
+import * as PL from './plano-contas.js';
 
 export function prepararFinanceiro() {
   db.exec(`CREATE TABLE IF NOT EXISTS fin_lancamentos (
@@ -48,8 +49,20 @@ function aplicarRegras(contaId, carteira, descricao) {
   const d = semAcento(descricao);
   return db.prepare('SELECT * FROM fin_regras WHERE conta_id=? AND (carteira IS NULL OR carteira=?) ORDER BY length(padrao) DESC').all(contaId, carteira).find(r => d.includes(semAcento(r.padrao))) || null;
 }
-async function categorizarComIA(carteira, itens) {
+async function categorizarComIA(carteira, itens, contaId) {
   if (!itens.length) return [];
+  if (contaId && PL.planoAtivo(contaId, carteira)) { // carteira com plano de contas: classifica direto nas contas do plano
+    const contas = PL.contasPlano(contaId, carteira); const { gerarJSON } = await import('../integracoes/gemini.js'); const saida = [];
+    for (let i = 0; i < itens.length; i += 120) {
+      const lote = itens.slice(i, i + 120);
+      const j = await gerarJSON(`Classifique cada lançamento bancário da carteira "${carteira}" numa conta do plano de contas abaixo (use o código). Entradas só em contas de entrada; saídas só em contas de saída. Transferência entre contas próprias: a conta de transferência. Sem conta adequada: codigo null.
+PLANO: ${contas.map(c => `${c.codigo} ${c.nome} (${c.tipo})`).join(' | ')}
+Responda JSON {"r":[{"i":número,"codigo":string|null}]}.
+${lote.map((x, k) => `${i + k}. ${x.valor < 0 ? 'SAÍDA' : 'ENTRADA'} ${Math.abs(x.valor).toFixed(2)} — ${x.descricao}`).join('\n')}`);
+      for (const r of (j.r || [])) { const c = r.codigo && contas.find(x => x.codigo === String(r.codigo)); saida[r.i] = c ? { categoria: c.grupo, subcategoria: PL.rotulo(c) } : null; }
+    }
+    return saida;
+  }
   const plano = ehPF(carteira) ? PLANO_PF : PLANO_PJ;
   const { gerarJSON } = await import('../integracoes/gemini.js');
   const saida = [];
@@ -69,7 +82,7 @@ export async function importarLancamentos(contaId, carteira, doc, { importacaoId
   if (!lanc.length) throw new Error('Não encontrei lançamentos nesse arquivo.');
   const regras = lanc.map(l => aplicarRegras(contaId, carteira, l.descricao));
   const semRegra = lanc.map((l, i) => ({ ...l, i })).filter((_, i) => !regras[i]);
-  let ia = []; try { ia = await categorizarComIA(carteira, semRegra); } catch (e) { console.error('[tina] categorizar', e.message); }
+  let ia = []; try { ia = await categorizarComIA(carteira, semRegra, contaId); } catch (e) { console.error('[tina] categorizar', e.message); }
   const catIA = {}; semRegra.forEach((l, k) => { catIA[l.i] = ia[k] || ia[l.i] || null; });
   const ins = db.prepare(`INSERT OR IGNORE INTO fin_lancamentos (conta_id, carteira, tipo, valor, descricao, categoria, subcategoria, status, data, pago_em, origem, hash, importacao_id) VALUES (?,?,?,?,?,?,?,'pago',?,?, 'extrato', ?, ?)`);
   let novos = 0, dup = 0, ent = 0, sai = 0;
@@ -174,16 +187,18 @@ export function ferramentas(_conta) {
   return [
     { name: 'definir_carteiras', description: 'Define a lista de carteiras do dono (cada empresa e a vida pessoal separadas). Substitui a lista inteira — inclua as existentes.', parameters: obj({ carteiras: { type: 'ARRAY', items: S } }, ['carteiras']) },
     { name: 'definir_saldo', description: 'Registra o saldo atual (ou numa data) de uma carteira — base para o fluxo de caixa.', parameters: obj({ carteira: S, saldo: N, data: { type: 'STRING', description: 'YYYY-MM-DD; padrão hoje' } }, ['carteira', 'saldo']) },
-    { name: 'registrar_lancamento', description: 'Registra uma entrada ou saída JÁ ACONTECIDA (ex.: "paguei 350 de luz ontem"). Exige carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['entrada', 'saida'] }, valor: N, descricao: S, categoria: S, subcategoria: S, data: S, contraparte: S, forcar_novo: B }, ['tipo', 'valor', 'descricao']) },
-    { name: 'criar_conta_pagar', description: 'Agenda uma conta a pagar (boleto, fornecedor, imposto). recorrente=true para conta fixa mensal.', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, subcategoria: S, linha_digitavel: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
-    { name: 'criar_conta_receber', description: 'Agenda um valor a receber (cliente, venda a prazo).', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
+    { name: 'registrar_lancamento', description: 'Registra uma entrada ou saída JÁ ACONTECIDA (ex.: "paguei 350 de luz ontem"). Exige carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['entrada', 'saida'] }, valor: N, descricao: S, categoria: S, subcategoria: S, data: S, contraparte: S, conta_plano: S, forcar_novo: B }, ['tipo', 'valor', 'descricao']) },
+    { name: 'criar_conta_pagar', description: 'Agenda uma conta a pagar (boleto, fornecedor, imposto). recorrente=true para conta fixa mensal.', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, subcategoria: S, conta_plano: S, linha_digitavel: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
+    { name: 'criar_conta_receber', description: 'Agenda um valor a receber (cliente, venda a prazo).', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, conta_plano: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
     { name: 'dar_baixa', description: 'Marca uma conta prevista como paga/recebida. SÓ quando o dono disser explicitamente que pagou/recebeu ("paguei", "recebi", "já paguei") ou mandar comprovante/extrato. Agradecimento, "ok" ou "o link ajudou" NÃO é pagamento. comprovante: descrição do comprovante, ou "declarado pelo dono" quando ele afirmou que pagou.', parameters: obj({ id: N, data: S, comprovante: S, extrato_id: N, valor_pago: N }, ['id']) },
     { name: 'listar_lancamentos', description: 'Lista lançamentos com filtros (período, carteira, categoria, tipo, status, texto).', parameters: obj({ carteira: S, de: S, ate: S, categoria: S, tipo: S, status: { type: 'STRING', enum: ['pago', 'previsto'] }, texto: S, limite: N }) },
     { name: 'contas_em_aberto', description: 'Contas a pagar/receber atrasadas, vencendo hoje e nos próximos dias.', parameters: obj({ dias: N, carteira: S }) },
     { name: 'gerar_dre', description: 'DRE gerencial do mês (padrão: mês anterior) por carteira ou consolidado, com comparação ao mês anterior e alertas.', parameters: obj({ mes: { type: 'STRING', description: 'YYYY-MM' }, carteira: S }) },
     { name: 'fluxo_caixa', description: 'Saldo de hoje, a pagar/receber e saldo projetado nos próximos dias por carteira, com alerta de saldo negativo.', parameters: obj({ dias: N, carteira: S }) },
-    { name: 'recategorizar', description: 'Corrige a categoria de lançamentos (por ids ou por texto na descrição). criar_regra=true faz a correção valer para os próximos (a Tina aprende).', parameters: obj({ ids: { type: 'ARRAY', items: N }, texto: S, carteira: S, categoria: S, subcategoria: S, criar_regra: B }, ['categoria']) },
+    { name: 'recategorizar', description: 'Corrige a categoria de lançamentos (por ids ou por texto na descrição). criar_regra=true faz a correção valer para os próximos (a Tina aprende).', parameters: obj({ ids: { type: 'ARRAY', items: N }, texto: S, carteira: S, categoria: S, subcategoria: S, conta_plano: S, criar_regra: B }) },
     { name: 'importar_extrato_pendente', description: 'Importa um extrato que já foi lido e estava aguardando o dono dizer a carteira.', parameters: obj({ importacao_id: N, carteira: S }, ['importacao_id', 'carteira']) },
+    { name: 'listar_plano_contas', description: 'Mostra o plano de contas de uma carteira (código, nome, entrada/saída, grupo do DRE). Use para escolher conta_plano quando a carteira usa plano.', parameters: obj({ carteira: S }, ['carteira']) },
+    { name: 'ativar_plano_contas', description: 'Liga o plano de contas numa carteira a partir de um modelo (empresa, industria, pessoal). Ajustes finos o dono faz no painel: Mais › Plano de contas.', parameters: obj({ carteira: S, modelo: { type: 'STRING', enum: ['empresa', 'industria', 'pessoal'] } }, ['carteira', 'modelo']) },
     { name: 'reabrir_lancamento', description: 'Desfaz uma baixa: a conta volta a ficar em aberto (prevista). Use quando o dono disser que NÃO pagou/recebeu algo que foi baixado. Nunca exclua a conta para isso.', parameters: obj({ id: N }, ['id']) },
     { name: 'excluir_lancamento', description: 'Exclui um lançamento ou conta prevista lançada por engano. Exige confirmação.', parameters: obj({ id: N }, ['id']) },
   ];
@@ -206,16 +221,18 @@ export async function executar(nome, a, conta) {
       if (igual && !a.forcar_novo) throw new Error(`já existe a conta prevista #${igual.id} "${igual.descricao}" (venc. ${igual.vencimento}) com esse valor. Se o dono disse que pagou, use dar_baixa nela; só registre novo se for outra despesa (forcar_novo=true).`);
       const regra = !a.categoria ? aplicarRegras(c, cart, a.descricao) : null;
       if (a.data && a.data > hoje()) a.data = hoje(); // já aconteceu: nunca data futura
+      const encR = PL.encaixarNoPlano(c, cart, a.tipo === 'entrada' ? 'entrada' : 'saida', { ...a, categoria: a.categoria || regra?.categoria, subcategoria: a.subcategoria || regra?.subcategoria }); a = encR.a;
       const id = Number(db.prepare("INSERT INTO fin_lancamentos (conta_id, carteira, tipo, valor, descricao, categoria, subcategoria, contraparte, status, data, pago_em, origem) VALUES (?,?,?,?,?,?,?,?,'pago',?,?,'manual')").run(c, cart, a.tipo === 'entrada' ? 'entrada' : 'saida', v, a.descricao, a.categoria || regra?.categoria || null, a.subcategoria || regra?.subcategoria || null, a.contraparte || null, a.data || hoje(), a.data || hoje()).lastInsertRowid);
-      return { ok: true, id, carteira: cart, valor: v, categoria: a.categoria || regra?.categoria || 'sem categoria — pergunte ou use recategorizar' };
+      return { ok: true, id, carteira: cart, valor: v, categoria: a.categoria || regra?.categoria || 'sem categoria — pergunte ou use recategorizar', conta_plano: encR.conta_plano, aviso: encR.aviso };
     }
     case 'criar_conta_pagar': case 'criar_conta_receber': {
       const cart = resolverCarteira(c, a.carteira); const v = Math.abs(Number(a.valor)); if (!v) throw new Error('valor inválido'); if (!/^\d{4}-\d{2}-\d{2}$/.test(a.vencimento || '')) throw new Error('vencimento no formato YYYY-MM-DD');
       const tipo = nome === 'criar_conta_pagar' ? 'saida' : 'entrada'; const regra = !a.categoria ? aplicarRegras(c, cart, a.descricao) : null;
+      const encC = PL.encaixarNoPlano(c, cart, tipo, { ...a, categoria: a.categoria || regra?.categoria, subcategoria: a.subcategoria || regra?.subcategoria }); a = encC.a;
       const doc = a.linha_digitavel ? String(a.linha_digitavel).replace(/\s/g, '') : null;
       if (doc && db.prepare('SELECT 1 FROM fin_lancamentos WHERE conta_id=? AND documento=? AND oculto=0').get(c, doc)) throw new Error('Esse boleto (mesma linha digitável) já está lançado.');
       const id = Number(db.prepare("INSERT INTO fin_lancamentos (conta_id, carteira, tipo, valor, descricao, categoria, subcategoria, contraparte, status, data, vencimento, origem, documento, recorrente) VALUES (?,?,?,?,?,?,?,?,'previsto',?,?,?,?,?)").run(c, cart, tipo, v, a.descricao, a.categoria || regra?.categoria || null, a.subcategoria || regra?.subcategoria || null, a.contraparte || null, a.vencimento, a.vencimento, doc ? 'boleto' : 'manual', doc, a.recorrente ? 1 : 0).lastInsertRowid);
-      return { ok: true, id, carteira: cart, tipo, valor: v, vencimento: a.vencimento, recorrente: !!a.recorrente };
+      return { ok: true, id, carteira: cart, tipo, valor: v, vencimento: a.vencimento, recorrente: !!a.recorrente, conta_plano: encC.conta_plano, aviso: encC.aviso };
     }
     case 'dar_baixa': {
       if (!a.comprovante && !a.extrato_id) throw new Error('Baixa sem comprovante nem extrato. Peça o comprovante (foto/print do pix) ou o extrato.');
@@ -242,6 +259,13 @@ export async function executar(nome, a, conta) {
     case 'fluxo_caixa': return fluxoCaixa(c, a);
     case 'recategorizar': {
       const cart = a.carteira ? resolverCarteira(c, a.carteira) : null; let n = 0;
+      if (a.conta_plano) { // conta do plano → categoria (grupo do DRE) + subcategoria (conta)
+        const cartP = cart || (a.ids?.length ? db.prepare('SELECT carteira FROM fin_lancamentos WHERE id=? AND conta_id=?').get(Number(a.ids[0]), c)?.carteira : null);
+        if (!cartP || !PL.planoAtivo(c, cartP)) throw new Error('essa carteira não usa plano de contas; use categoria/subcategoria');
+        const conta = PL.acharConta(c, cartP, a.conta_plano); if (!conta) throw new Error(`"${a.conta_plano}" não está no plano de ${cartP}: ${PL.contasPlano(c, cartP).map(PL.rotulo).join(' · ')}`);
+        a = { ...a, categoria: conta.grupo, subcategoria: PL.rotulo(conta) };
+      }
+      if (!a.categoria) throw new Error('informe categoria ou conta_plano');
       if (a.ids?.length) n = db.prepare(`UPDATE fin_lancamentos SET categoria=?, subcategoria=COALESCE(?, subcategoria) WHERE conta_id=? AND id IN (${a.ids.map(() => '?').join(',')})`).run(a.categoria, a.subcategoria || null, c, ...a.ids.map(Number)).changes;
       else if (a.texto) n = db.prepare(`UPDATE fin_lancamentos SET categoria=?, subcategoria=COALESCE(?, subcategoria) WHERE conta_id=? ${cart ? 'AND carteira=?' : ''} AND lower(descricao) LIKE ?`).run(a.categoria, a.subcategoria || null, c, ...(cart ? [cart] : []), `%${semAcento(a.texto)}%`).changes;
       else throw new Error('informe ids ou texto');
@@ -252,6 +276,15 @@ export async function executar(nome, a, conta) {
       const imp = db.prepare("SELECT * FROM fin_importacoes WHERE id=? AND conta_id=? AND status='pendente'").get(Number(a.importacao_id), c); if (!imp) throw new Error('importação não encontrada ou já feita');
       const cart = resolverCarteira(c, a.carteira); const r = await importarLancamentos(c, cart, JSON.parse(imp.dados), { importacaoId: imp.id });
       db.prepare("UPDATE fin_importacoes SET status='importada', carteira=? WHERE id=?").run(cart, imp.id); return r;
+    }
+    case 'listar_plano_contas': {
+      const cart = resolverCarteira(c, a.carteira); const cfg = PL.cfgPlano(c, cart);
+      if (!cfg?.ativo) return { carteira: cart, usa_plano: false, dica: 'Essa carteira não usa plano de contas. Para ligar: ativar_plano_contas (modelos: empresa, industria, pessoal) ou pelo painel em Mais › Plano de contas.' };
+      return { carteira: cart, usa_plano: true, modelo: cfg.modelo, contas: PL.contasPlano(c, cart).map(x => ({ conta: PL.rotulo(x), tipo: x.tipo, grupo_dre: x.grupo })) };
+    }
+    case 'ativar_plano_contas': {
+      const cart = resolverCarteira(c, a.carteira); const contas = PL.aplicarModelo(c, cart, a.modelo);
+      return { ok: true, carteira: cart, modelo: a.modelo, contas: contas.length, dica: 'O dono pode renomear, criar ou desativar contas no painel: Mais › Plano de contas.' };
     }
     case 'reabrir_lancamento': {
       const p = db.prepare('SELECT * FROM fin_lancamentos WHERE id=? AND conta_id=?').get(Number(a.id), c); if (!p) throw new Error(`lançamento #${a.id} não encontrado`);
