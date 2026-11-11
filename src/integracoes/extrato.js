@@ -57,10 +57,10 @@ export function lerCSV(texto) {
 }
 
 const INSTRUCAO = `Você recebeu um documento financeiro brasileiro. Classifique e extraia SOMENTE o que está escrito (nunca invente valores). Responda em JSON:
-{"tipo":"extrato"|"fatura"|"boleto"|"comprovante"|"outro",
+{"tipo":"extrato"|"fatura"|"boleto"|"comprovante"|"outro",   // conta a pagar sem ser boleto (fatura de serviço, cobrança com PIX) também é "boleto"
  "banco": string|null, "saldo_final": number|null, "saldo_data": "YYYY-MM-DD"|null,
  "lancamentos": [{"data":"YYYY-MM-DD","descricao":string,"valor":number}],   // extrato/fatura: cada linha; SAÍDA/compra/débito NEGATIVO, entrada/crédito positivo; ignore linhas de saldo
- "boleto": {"beneficiario":string,"valor":number,"vencimento":"YYYY-MM-DD","linha_digitavel":string}|null,
+ "boleto": {"beneficiario":string,"valor":number,"vencimento":"YYYY-MM-DD","linha_digitavel":string|null,"codigo_barras":string|null,"pix_chave":string|null,"pix_copia_cola":string|null,"link_pagamento":string|null}|null,   // boleto OU qualquer conta/fatura/cobrança a pagar (luz, condomínio, nota com PIX); copie EXATAMENTE os dígitos/códigos; pix_copia_cola começa com 000201; link = URL do boleto/pagamento
  "comprovante": {"favorecido":string,"valor":number,"data":"YYYY-MM-DD","tipo":"pix"|"ted"|"boleto"|"cartao"|"outro"}|null,
  "legivel": boolean}
 Fatura de cartão: as compras são saídas (negativas); pagamentos da fatura anterior e estornos, positivos.`;

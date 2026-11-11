@@ -20,8 +20,33 @@ export function prepararFinanceiro() {
     CREATE TABLE IF NOT EXISTS fin_importacoes (id INTEGER PRIMARY KEY, conta_id INTEGER NOT NULL, carteira TEXT, dados TEXT NOT NULL, resumo TEXT, status TEXT DEFAULT 'pendente', criado_em TEXT DEFAULT CURRENT_TIMESTAMP)`);
   try { db.exec('ALTER TABLE contas ADD COLUMN carteiras TEXT'); } catch {}
   CF.prepararContasFin();
+  for (const col of ['pix_chave', 'pix_copia_cola', 'link_pagamento', 'codigo_barras']) { try { db.exec(`ALTER TABLE fin_lancamentos ADD COLUMN ${col} TEXT`); } catch {} }
 }
 prepararFinanceiro();
+
+/** Dados para pagar uma conta: linha digitável (documento), código de barras, PIX (chave ou copia e cola) e link do boleto. */
+export function normalizarPagamento(a = {}) {
+  const dig = (v) => String(v || '').replace(/\D/g, '');
+  const linha = dig(a.linha_digitavel); const barras = dig(a.codigo_barras);
+  const cc = String(a.pix_copia_cola || '').replace(/\s+/g, '').trim(); const link = String(a.link_pagamento || '').trim();
+  return {
+    documento: linha.length >= 44 ? linha : null,
+    codigo_barras: barras.length === 44 ? barras : (linha.length === 44 && !linha.startsWith('8') ? null : null),
+    pix_copia_cola: /^0002\d{2}/.test(cc) ? cc.slice(0, 512) : null,
+    pix_chave: String(a.pix_chave || '').trim().slice(0, 120) || null,
+    link_pagamento: /^https?:\/\//i.test(link) ? link.slice(0, 500) : null,
+  };
+}
+/** Ações de copiar/abrir para uma conta (web e Telegram). */
+export function acoesPagamento(l) {
+  const out = []; const linha = String(l.documento || '').replace(/\D/g, '');
+  if (linha.length >= 44) out.push({ rotulo: 'Copiar código do boleto', copiar: linha, curto: 'Código' });
+  else if (l.codigo_barras) out.push({ rotulo: 'Copiar código de barras', copiar: l.codigo_barras, curto: 'Barras' });
+  if (l.pix_copia_cola) out.push({ rotulo: 'Copiar PIX copia e cola', copiar: l.pix_copia_cola, curto: 'PIX' });
+  else if (l.pix_chave) out.push({ rotulo: 'Copiar chave PIX', copiar: l.pix_chave, curto: 'Chave PIX' });
+  if (l.link_pagamento) out.push({ rotulo: "Abrir boleto", url: l.link_pagamento, curto: "Boleto" });
+  return out;
+}
 
 /**
  * Reparo único (2026-11): transferências entre contas que a Tina lançou como receita + despesa
@@ -205,7 +230,7 @@ export function fluxoCaixa(contaId, { dias = 15, carteira } = {}) {
 }
 export function contasEmAberto(contaId, { dias = 7, carteira } = {}) {
   const cart = carteira ? resolverCarteira(contaId, carteira) : null; const fim = somaDias(hoje(), Number(dias) || 7);
-  const rows = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, COALESCE(vencimento,data) venc, documento FROM fin_lancamentos WHERE conta_id=? ${cart ? 'AND carteira=?' : ''} AND status='previsto' AND oculto=0 AND COALESCE(vencimento,data)<=? ORDER BY venc`).all(...(cart ? [contaId, cart, fim] : [contaId, fim]));
+  const rows = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, COALESCE(vencimento,data) venc, documento, codigo_barras, pix_chave, pix_copia_cola, link_pagamento FROM fin_lancamentos WHERE conta_id=? ${cart ? 'AND carteira=?' : ''} AND status='previsto' AND oculto=0 AND COALESCE(vencimento,data)<=? ORDER BY venc`).all(...(cart ? [contaId, cart, fim] : [contaId, fim]));
   return { hoje: hoje(), ate: fim, atrasadas: rows.filter(r => r.venc < hoje()), vencem_hoje: rows.filter(r => r.venc === hoje()), proximas: rows.filter(r => r.venc > hoje()) };
 }
 /** Linhas para o aviso das 8h (contas vencendo hoje e atrasadas). */
@@ -223,7 +248,7 @@ export function ferramentas(_conta) {
     { name: 'definir_carteiras', description: 'Define a lista de carteiras do dono (cada empresa e a vida pessoal separadas). Substitui a lista inteira — inclua as existentes.', parameters: obj({ carteiras: { type: 'ARRAY', items: S } }, ['carteiras']) },
     { name: 'definir_saldo', description: 'Registra o saldo atual (ou numa data) de uma carteira — base para o fluxo de caixa.', parameters: obj({ carteira: S, saldo: N, data: { type: 'STRING', description: 'YYYY-MM-DD; padrão hoje' }, conta: { type: 'STRING', description: 'conta bancária ou dinheiro (quando a carteira tem várias contas)' } }, ['carteira', 'saldo']) },
     { name: 'registrar_lancamento', description: 'Registra uma entrada ou saída JÁ ACONTECIDA (ex.: "paguei 350 de luz ontem"). Exige carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['entrada', 'saida'] }, valor: N, descricao: S, categoria: S, subcategoria: S, data: S, contraparte: S, conta_plano: S, conta: S, forcar_novo: B }, ['tipo', 'valor', 'descricao']) },
-    { name: 'criar_conta_pagar', description: 'Agenda uma conta a pagar (boleto, fornecedor, imposto). recorrente=true para conta fixa mensal.', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, subcategoria: S, conta_plano: S, conta: S, linha_digitavel: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
+    { name: 'criar_conta_pagar', description: 'Agenda uma conta a pagar (boleto, fornecedor, imposto). recorrente=true para conta fixa mensal.', parameters: obj({ codigo_barras: S, pix_chave: S, pix_copia_cola: S, link_pagamento: S, carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, subcategoria: S, conta_plano: S, conta: S, linha_digitavel: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
     { name: 'criar_conta_receber', description: 'Agenda um valor a receber (cliente, venda a prazo).', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, conta_plano: S, conta: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
     { name: 'dar_baixa', description: 'Marca uma conta prevista como paga/recebida. SÓ quando o dono disser explicitamente que pagou/recebeu ("paguei", "recebi", "já paguei") ou mandar comprovante/extrato. Agradecimento, "ok" ou "o link ajudou" NÃO é pagamento. comprovante: descrição do comprovante, ou "declarado pelo dono" quando ele afirmou que pagou.', parameters: obj({ id: N, data: S, comprovante: S, extrato_id: N, valor_pago: N, conta: { type: 'STRING', description: 'conta/cartão de onde saiu ou entrou o dinheiro (opcional)' } }, ['id']) },
     { name: 'listar_lancamentos', description: 'Lista lançamentos com filtros (período, carteira, categoria, tipo, status, texto).', parameters: obj({ carteira: S, de: S, ate: S, categoria: S, tipo: S, status: { type: 'STRING', enum: ['pago', 'previsto'] }, texto: S, limite: N }) },
@@ -238,6 +263,7 @@ export function ferramentas(_conta) {
     { name: 'ver_alteracoes_planilha', description: 'Compara a planilha "Espelho financeiro" (aba Lançamentos) com o Fiel e mostra o que o dono mudou lá: lançamentos alterados, novos (linhas sem ID) e removidos. Não grava nada. Use quando o dono disser que editou a planilha ou pedir para atualizar pelo que está nela.', parameters: obj({}, []) },
     { name: 'aplicar_alteracoes_planilha', description: 'Aplica no Fiel as alterações da planilha espelho, depois que o dono viu a lista (ver_alteracoes_planilha) e confirmou. Por padrão aplica alterados e novos; removidos só se o dono pedir (remover_ids). Exige confirmação.', parameters: obj({ ids: { type: 'ARRAY', items: N }, remover_ids: { type: 'ARRAY', items: N } }, []) },
     { name: 'definir_conta_lancamento', description: 'Corrige em qual conta bancária/cartão/dinheiro um lançamento já registrado aconteceu (ex.: "essa saída foi do BB", "a entrada caiu no Porto Seguro"). Numa transferência, a SAÍDA fica na conta de onde o dinheiro saiu e a ENTRADA na conta onde ele chegou.', parameters: obj({ id: N, conta: S }, ['id', 'conta']) },
+    { name: 'salvar_dados_pagamento', description: 'Guarda num lançamento JÁ registrado (conta a pagar) como pagar: linha digitável do boleto, código de barras, chave PIX, PIX copia e cola ou link do boleto. Use quando chegar o documento de uma conta que já existe (não crie outra).', parameters: obj({ id: N, linha_digitavel: S, codigo_barras: S, pix_chave: S, pix_copia_cola: S, link_pagamento: S }, ['id']) },
     { name: 'ficha_carteira', description: 'Define se a carteira é de uma empresa (pj) ou de uma pessoa (pf) e o titular (razão social ou nome completo). Use quando o dono disser de quem é a carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['pj', 'pf'] }, titular: S }, ['carteira', 'tipo']) },
     { name: 'cadastrar_conta_financeira', description: 'Cadastra uma conta bancária, cartão de crédito, cartão de débito ou dinheiro numa carteira. Cartão de crédito: informe dia_fechamento e dia_vencimento. O dono também cadastra no painel: Mais › Contas e cartões.', parameters: obj({ carteira: S, nome: S, tipo: { type: 'STRING', enum: ['banco', 'cartao_credito', 'cartao_debito', 'dinheiro', 'outro'] }, instituicao: S, final: S, limite: N, dia_fechamento: N, dia_vencimento: N }, ['carteira', 'nome', 'tipo']) },
     { name: 'pagar_fatura_cartao', description: 'Dá baixa na fatura de um cartão de crédito (todas as compras daquele vencimento), quando o dono disser que pagou. pago_com = conta bancária de onde saiu o dinheiro.', parameters: obj({ cartao: S, carteira: S, vencimento: S, pago_com: S, comprovante: S }, ['cartao']) },
@@ -280,11 +306,12 @@ export async function executar(nome, a, conta) {
       const cart = resolverCarteira(c, a.carteira); const v = Math.abs(Number(a.valor)); if (!v) throw new Error('valor inválido'); if (!/^\d{4}-\d{2}-\d{2}$/.test(a.vencimento || '')) throw new Error('vencimento no formato YYYY-MM-DD');
       const tipo = nome === 'criar_conta_pagar' ? 'saida' : 'entrada'; const regra = !a.categoria ? aplicarRegras(c, cart, a.descricao) : null;
       const encC = PL.encaixarNoPlano(c, cart, tipo, { ...a, categoria: a.categoria || regra?.categoria, subcategoria: a.subcategoria || regra?.subcategoria }); a = encC.a;
-      const doc = a.linha_digitavel ? String(a.linha_digitavel).replace(/\s/g, '') : null;
+      const pg = normalizarPagamento(a); const doc = pg.documento || (a.linha_digitavel ? String(a.linha_digitavel).replace(/\s/g, '') : null);
       if (doc && db.prepare('SELECT 1 FROM fin_lancamentos WHERE conta_id=? AND documento=? AND oculto=0').get(c, doc)) throw new Error('Esse boleto (mesma linha digitável) já está lançado.');
       const id = Number(db.prepare("INSERT INTO fin_lancamentos (conta_id, carteira, tipo, valor, descricao, categoria, subcategoria, contraparte, status, data, vencimento, origem, documento, recorrente) VALUES (?,?,?,?,?,?,?,?,'previsto',?,?,?,?,?)").run(c, cart, tipo, v, a.descricao, a.categoria || regra?.categoria || null, a.subcategoria || regra?.subcategoria || null, a.contraparte || null, a.vencimento, a.vencimento, doc ? 'boleto' : 'manual', doc, a.recorrente ? 1 : 0).lastInsertRowid);
       const cfC = CF.resolverContaFin(c, cart, a.conta); if (cfC) db.prepare('UPDATE fin_lancamentos SET conta_fin_id=? WHERE id=?').run(cfC.id, id);
-      return { ok: true, id, carteira: cart, tipo, valor: v, vencimento: a.vencimento, recorrente: !!a.recorrente, conta_plano: encC.conta_plano, aviso: encC.aviso, conta: cfC ? CF.rotuloConta(cfC) : undefined };
+      db.prepare('UPDATE fin_lancamentos SET codigo_barras=?, pix_copia_cola=?, pix_chave=?, link_pagamento=? WHERE id=?').run(pg.codigo_barras, pg.pix_copia_cola, pg.pix_chave, pg.link_pagamento, id);
+      return { ok: true, id, carteira: cart, tipo, valor: v, vencimento: a.vencimento, recorrente: !!a.recorrente, conta_plano: encC.conta_plano, aviso: encC.aviso, conta: cfC ? CF.rotuloConta(cfC) : undefined, pagamento_salvo: acoesPagamento({ documento: doc, ...pg }).map(x => x.rotulo) };
     }
     case 'dar_baixa': {
       if (!a.comprovante && !a.extrato_id) throw new Error('Baixa sem comprovante nem extrato. Peça o comprovante (foto/print do pix) ou o extrato.');
@@ -366,6 +393,12 @@ export async function executar(nome, a, conta) {
       const cf = CF.resolverContaFin(c, l.carteira, a.conta); if (!cf) throw new Error(`a carteira ${l.carteira} não tem contas cadastradas`);
       if (cf.tipo === 'cartao_credito' || !l.pago_com_id) db.prepare('UPDATE fin_lancamentos SET conta_fin_id=? WHERE id=?').run(cf.id, l.id); else db.prepare('UPDATE fin_lancamentos SET pago_com_id=? WHERE id=?').run(cf.id, l.id);
       return { ok: true, id: l.id, descricao: l.descricao, tipo: l.tipo, conta: CF.rotuloConta(cf) };
+    }
+    case 'salvar_dados_pagamento': {
+      const l = db.prepare('SELECT * FROM fin_lancamentos WHERE id=? AND conta_id=?').get(Number(a.id), c); if (!l) throw new Error('lançamento não encontrado');
+      const pg = normalizarPagamento(a); const novo = { documento: pg.documento || l.documento, codigo_barras: pg.codigo_barras || l.codigo_barras, pix_copia_cola: pg.pix_copia_cola || l.pix_copia_cola, pix_chave: pg.pix_chave || l.pix_chave, link_pagamento: pg.link_pagamento || l.link_pagamento };
+      db.prepare('UPDATE fin_lancamentos SET documento=?, codigo_barras=?, pix_copia_cola=?, pix_chave=?, link_pagamento=? WHERE id=?').run(novo.documento, novo.codigo_barras, novo.pix_copia_cola, novo.pix_chave, novo.link_pagamento, l.id);
+      return { ok: true, id: l.id, descricao: l.descricao, pagamento_salvo: acoesPagamento(novo).map(x => x.rotulo) };
     }
     case 'ficha_carteira': { const cart = resolverCarteira(c, a.carteira); CF.salvarFicha(c, cart, { tipo: a.tipo, titular: a.titular }); return { ok: true, carteira: cart, ...CF.fichaCarteira(c, cart) }; }
     case 'cadastrar_conta_financeira': {

@@ -86,6 +86,9 @@ async function avisarFinanceiro(canal) {
   for (const u of db.prepare("SELECT u.conta_id, u.chat_id FROM usuarios u JOIN modulos m ON m.conta_id=u.conta_id AND m.modulo='financeiro' AND m.ligado=1 WHERE u.papel='dono' GROUP BY u.conta_id ORDER BY u.canal<>'telegram'").all()) {
     try { const avisos = avisosFinanceiros(u.conta_id); if (avisos.length) await canal.enviar(u.conta_id, u.chat_id, `💰 *Tina · contas a pagar/receber*\n${avisos.slice(0, 15).join('\n')}${avisos.length > 15 ? `\n…e mais ${avisos.length - 15}. Peça "contas em aberto".` : ''}`); }
     catch (e) { console.error('financeiro avisos', u.conta_id, e.message); }
+      try { const F = await import('../ferramentas/financeiro.js'); const a = F.contasEmAberto(u.conta_id, { dias: 2 });
+        const botoes = [...a.atrasadas, ...a.vencem_hoje].filter(r => r.tipo === 'saida').map(r => F.acoesPagamento(r).filter(x => !x.url || /^https:/.test(x.url)).slice(0, 3).map(x => x.url ? { t: `🔗 ${r.descricao.slice(0, 18)}`, url: x.url } : { t: `📋 ${x.curto} · ${r.descricao.slice(0, 18)}`, copiar: x.copiar })).filter(l => l.length).slice(0, 8);
+        if (botoes.length) await canal.enviar(u.conta_id, u.chat_id, { texto: '📋 Toque para copiar e pagar:', botoes }); } catch (e) { console.error('financeiro copiar', e.message); }
   }
 }
 async function avisarVencimentos(canal) {

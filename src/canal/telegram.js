@@ -89,7 +89,7 @@ export class TelegramCanal {
 /** botoes: [[{t:'Publicar', d:'story 1'}, …], …] ou já um reply_markup pronto. callback_data ≤ 64 bytes. */
 function teclado(b) {
   if (!b) return undefined; if (b.inline_keyboard || b.keyboard) return b;
-  return { inline_keyboard: b.map(linha => linha.map(x => x.url ? { text: x.t, url: x.url } : ({ text: x.t, callback_data: String(x.d ?? x.t).slice(0, 64) }))) };
+  return { inline_keyboard: b.map(linha => linha.map(x => x.url ? { text: x.t, url: x.url } : x.copiar ? { text: x.t, copy_text: { text: String(x.copiar).slice(0, 256) } } : ({ text: x.t, callback_data: String(x.d ?? x.t).slice(0, 64) }))) };
 }
 const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 function paraHTML(t) {

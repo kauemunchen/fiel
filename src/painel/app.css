@@ -783,3 +783,12 @@ body[data-tela="conversa"] #app.com-trilho{grid-template-columns:256px minmax(0,
   .fin-cf{grid-template-columns:1fr;gap:8px}.fin-cf-it{padding:10px 12px}.fin-cf-it .cf-ic{width:34px;height:34px;border-radius:10px}
   .fin-cf-it>.h-txt>span{font-size:15px}
 }
+
+/* Copiar dados de pagamento (boleto, PIX, link) */
+.fin-pg{display:flex;gap:6px;flex-wrap:wrap}
+.fin-pg-b{display:inline-flex;align-items:center;gap:4px;min-height:34px;padding:0 12px;border-radius:999px;border:1px solid var(--coral);background:transparent;color:var(--tinta);font:700 13px var(--f-body);cursor:pointer;text-decoration:none;white-space:nowrap}
+.fin-pg-b::before{content:'';width:12px;height:12px;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4'%3E%3Crect x='9' y='9' width='11' height='11' rx='2'/%3E%3Cpath d='M5 15V5a1 1 0 0 1 1-1h9'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4'%3E%3Crect x='9' y='9' width='11' height='11' rx='2'/%3E%3Cpath d='M5 15V5a1 1 0 0 1 1-1h9'/%3E%3C/svg%3E") center/contain no-repeat}
+a.fin-pg-b::before{-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4'%3E%3Cpath d='M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4'%3E%3Cpath d='M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5'/%3E%3C/svg%3E")}
+.fin-pg-b:hover{background:var(--coral)}.fin-pg-b.ok{background:#2F7A4F;border-color:#2F7A4F;color:#fff}
+.fin-lin .fin-pg{margin-top:6px}
+.fin-lin .h-txt .fin-pg{display:flex!important;flex-direction:row!important;flex-wrap:wrap;gap:6px}.fin-lin .h-txt .fin-pg>*{width:auto;flex:none}

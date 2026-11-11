@@ -28,6 +28,7 @@ function acoesHtml(acoes, i) { return (acoes || []).map((a, j) => `<button class
 function ligarAcoes(raiz, itens) {
   raiz.querySelectorAll('.btn-h').forEach(b => b.onclick = async () => { const a = itens[b.dataset.i]?.acoes?.[b.dataset.j]; if (!a) return;
     if (a.copiar) { try { await navigator.clipboard.writeText(a.copiar); toast('Código copiado'); } catch { prompt('Copie o código:', a.copiar); } return; }
+    if (a.url) { window.open(a.url, '_blank', 'noopener'); return; }
     if (a.excluir) { // dois cliques: o primeiro pede confirmação no próprio botão
       if (!b.dataset.conf) { b.dataset.conf = '1'; b.textContent = 'Confirmar descarte'; b.classList.add('perigo'); setTimeout(() => { if (b.isConnected && b.dataset.conf) { delete b.dataset.conf; b.textContent = a.rotulo; b.classList.remove('perigo'); } }, 4000); return; }
       b.disabled = true; const r = await api(a.excluir, { method: 'DELETE' });
@@ -527,7 +528,7 @@ telas.financeiro = async () => {
     ${kpi('A pagar · 30 dias', brlF(d.abertos.a_pagar_30), d.abertos.atrasado_pagar ? `<span class="fin-alerta">${brlF(d.abertos.atrasado_pagar)} em atraso</span>` : 'nada em atraso')}
     ${kpi('Saldo previsto em 30 dias', brlF(d.previsao.d30), d.previsao.menor.valor < 0 ? `<span class="fin-alerta">fica negativo em ${dataBR(d.previsao.menor.dia)}</span>` : `60d ${brlF(d.previsao.d60)} · 90d ${brlF(d.previsao.d90)}`, d.previsao.d30 < 0 ? 'neg' : '')}
   </div>`;
-  const venc = d.vencimentos.length ? d.vencimentos.map((v, i) => `<div class="fin-lin${v.atrasado ? ' atras' : ''}"><time>${v.atrasado ? 'atrasada' : v.hoje ? 'hoje' : dataBR(v.venc)}</time><div class="h-txt"><span>${esc(v.descricao || v.contraparte || 'Lançamento')}</span><small>${esc(v.carteira)}${v.categoria ? ' · ' + esc(v.categoria) : ''}</small></div><b class="fin-v ${v.tipo}">${v.tipo === 'entrada' ? '+' : '−'}${brlF(v.valor)}</b><button class="btn-h sec fin-bx" data-i="${i}">${v.tipo === 'entrada' ? 'Recebi' : 'Paguei'}</button></div>`).join('') : '<p class="h-vazio">Nada a vencer nos próximos 30 dias.</p>';
+  const venc = d.vencimentos.length ? d.vencimentos.map((v, i) => `<div class="fin-lin${v.atrasado ? ' atras' : ''}"><time>${v.atrasado ? 'atrasada' : v.hoje ? 'hoje' : dataBR(v.venc)}</time><div class="h-txt"><span>${esc(v.descricao || v.contraparte || 'Lançamento')}</span><small>${esc(v.carteira)}${v.categoria ? ' · ' + esc(v.categoria) : ''}</small>${(v.pagar || []).length ? `<span class="fin-pg">${v.pagar.map(x => x.url ? `<a class="fin-pg-b" href="${esc(x.url)}" target="_blank" rel="noopener" title="${esc(x.rotulo)}">${esc(x.curto)}</a>` : `<button type="button" class="fin-pg-b" data-copiar="${esc(x.copiar)}" title="${esc(x.rotulo)}">${esc(x.curto)}</button>`).join('')}</span>` : ''}</div><b class="fin-v ${v.tipo}">${v.tipo === 'entrada' ? '+' : '−'}${brlF(v.valor)}</b><button class="btn-h sec fin-bx" data-i="${i}">${v.tipo === 'entrada' ? 'Recebi' : 'Paguei'}</button></div>`).join('') : '<p class="h-vazio">Nada a vencer nos próximos 30 dias.</p>';
   const maxCat = Math.max(1, ...d.categorias.map(c => c.total));
   const cats = d.categorias.length ? d.categorias.map(c => `<div class="fin-cat"><span>${esc(c.categoria)}</span><div class="fin-cat-b"><i style="width:${(c.total / maxCat * 100).toFixed(1)}%"></i></div><b>${brlF(c.total)}</b></div>`).join('') : '<p class="h-vazio">Sem despesas pagas neste mês.</p>';
   const ult = d.ultimos.length ? d.ultimos.map(u => `<div class="fin-lin"><time>${dataBR(u.quando)}</time><div class="h-txt"><span>${esc(u.descricao || u.contraparte || 'Lançamento')}</span><small>${esc(u.carteira)}${u.categoria ? ' · ' + esc(u.categoria) : ''}</small></div><b class="fin-v ${u.tipo}">${u.tipo === 'entrada' ? '+' : '−'}${brlF(u.valor)}</b></div>`).join('') : '<p class="h-vazio">Nenhum lançamento pago ainda.</p>';
@@ -556,6 +557,7 @@ telas.financeiro = async () => {
     $('#finContas').onclick = () => { cfEstado.carteira = finEstado.carteira || ''; mostrarTela('contasfin'); };
     $('#finPlano').onclick = () => { planoEstado.carteira = finEstado.carteira || ''; mostrarTela('plano'); };
     $('#finMes').onchange = (e) => { finEstado.mes = e.target.value; mostrarTela('financeiro'); };
+    raiz.querySelectorAll('.fin-pg-b[data-copiar]').forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copiar); toast(b.title.replace('Copiar', '').trim() + ' copiado'); b.classList.add('ok'); setTimeout(() => b.classList.remove('ok'), 1500); } catch { prompt('Copie:', b.dataset.copiar); } });
     raiz.querySelectorAll('.fin-bx').forEach(b => b.onclick = () => { const v = d.vencimentos[b.dataset.i]; mostrarTela('conversa'); enviar(`${nomeTina}, ${v.tipo === 'entrada' ? 'recebi' : 'paguei'}: ${v.descricao || v.contraparte} (${brlF(v.valor)}, ${v.carteira}).`); });
     raiz.querySelectorAll('.fin-box [data-cmd]').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); });
   } };

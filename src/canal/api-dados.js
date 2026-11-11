@@ -117,11 +117,12 @@ export function rotasDados(app) {
     const precisa = [], feito = [], depois = [];
 
     // 1. Precisa de você
-    for (const f of q(`SELECT id, descricao, contraparte, valor, vencimento, documento FROM fin_lancamentos WHERE conta_id=? AND tipo='saida' AND status IN ('pendente','previsto') AND oculto=0 AND vencimento IS NOT NULL AND vencimento<=? ORDER BY vencimento LIMIT 6`, id, hoje)) {
+    const Fh = await import('../ferramentas/financeiro.js');
+    for (const f of q(`SELECT id, descricao, contraparte, valor, vencimento, documento, codigo_barras, pix_chave, pix_copia_cola, link_pagamento FROM fin_lancamentos WHERE conta_id=? AND tipo='saida' AND status IN ('pendente','previsto') AND oculto=0 AND vencimento IS NOT NULL AND vencimento<=? ORDER BY vencimento LIMIT 6`, id, hoje)) {
       const atrasado = f.vencimento < hoje;
       precisa.push({ tipo: 'conta', modulo: 'financeiro', quem: quem('financeiro'), titulo: `${curto(f.descricao || f.contraparte || 'Conta a pagar', 60)} · ${brl(f.valor)}`,
         detalhe: atrasado ? `venceu em ${f.vencimento.split('-').reverse().join('/')}` : 'vence hoje', alerta: true,
-        acoes: [...(f.documento && /^[\d .]{30,}$/.test(f.documento) ? [{ rotulo: 'Copiar código', copiar: f.documento.replace(/\D/g, '') }] : []), { rotulo: 'Já paguei', cmd: `Tina, já paguei: ${f.descricao || f.contraparte} (${brl(f.valor)}).`, sec: true }] });
+        acoes: [...((ap) => ap.map(x => ({ rotulo: ap.length > 1 ? (x.curto === 'Boleto' ? 'Abrir boleto' : x.curto === 'Código' ? 'Código' : x.curto) : (x.curto === 'Código' ? 'Copiar código' : x.curto === 'Boleto' ? 'Abrir boleto' : 'Copiar ' + x.curto), copiar: x.copiar, url: x.url })))(Fh.acoesPagamento(f)), { rotulo: 'Já paguei', cmd: `Tina, já paguei: ${f.descricao || f.contraparte} (${brl(f.valor)}).`, sec: true }] });
     }
     for (const p of q(`SELECT id, tema FROM posts WHERE conta_id=? AND status='erro' ORDER BY id DESC LIMIT 3`, id))
       precisa.push({ tipo: 'post', modulo: 'social', quem: quem('social'), titulo: `Post não publicou: ${curto(p.tema || 'sem tema', 50)}`, detalhe: 'precisa tentar de novo', alerta: true,
@@ -194,7 +195,7 @@ export function rotasDados(app) {
     const saldos = contaSel ? [{ carteira: CFm.rotuloConta(contaSel), ...(/cartao/.test(contaSel.tipo) ? { saldo: 0, tem_saldo_inicial: true, base: 'cartão: veja a fatura' } : (s => ({ saldo: s.saldo, tem_saldo_inicial: s.informado, base: s.informado ? `saldo informado em ${s.data_base}` : 'saldo ainda não informado' }))(CFm.saldoContaFin(id, contaSel.id))) }]
       : carts.map(c => ({ carteira: c, ...F.saldoAtual(id, c) }));
     const saldoHoje = r2(saldos.reduce((a, s) => a + s.saldo, 0));
-    const prev = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, categoria, COALESCE(vencimento,data) venc, documento FROM fin_lancamentos WHERE conta_id=?${cond} AND status IN ('previsto','pendente') AND oculto=0 ORDER BY venc`.replace('conta_id=?' + cond, 'conta_id=?' + condP)).all(id, ...ca);
+    const prev = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, categoria, COALESCE(vencimento,data) venc, documento, codigo_barras, pix_chave, pix_copia_cola, link_pagamento FROM fin_lancamentos WHERE conta_id=?${cond} AND status IN ('previsto','pendente') AND oculto=0 ORDER BY venc`.replace('conta_id=?' + cond, 'conta_id=?' + condP)).all(id, ...ca);
     const ate = (d) => prev.filter(p => p.venc <= d);
     const somaT = (l, t) => r2(l.filter(p => p.tipo === t).reduce((a, p) => a + p.valor, 0));
     const atras = prev.filter(p => p.venc < hoje);
@@ -220,7 +221,7 @@ export function rotasDados(app) {
       previsao: { d30: proj(30), d60: proj(60), d90: proj(90), menor: minimo, serie },
       contas_fin: await (async () => { const CF = await import('../ferramentas/contas-fin.js'); return CF.listarContasFin(id, cart).filter(x => !contaSel || x.id === contaSel.id).map(x => ({ id: x.id, carteira: x.carteira, rotulo: CF.rotuloConta(x), tipo: x.tipo, limite: x.limite, ...(x.tipo === 'cartao_credito' ? { faturas: CF.faturasCartao(id, x.id).slice(0, 2) } : x.tipo === 'cartao_debito' ? {} : { saldo: CF.saldoContaFin(id, x.id) }) })); })(),
       historico, categorias, ultimos,
-      vencimentos: prev.filter(p => p.venc <= soma(hoje, 30)).slice(0, 12).map(p => ({ ...p, atrasado: p.venc < hoje, hoje: p.venc === hoje })) });
+      vencimentos: await (async () => { const Fv = await import('../ferramentas/financeiro.js'); return prev.filter(p => p.venc <= soma(hoje, 30)).slice(0, 12).map(p => ({ ...p, atrasado: p.venc < hoje, hoje: p.venc === hoje, pagar: p.tipo === 'saida' ? Fv.acoesPagamento(p) : [] })); })() });
   });
 
   // ---------- Plano de contas (opcional, por carteira) ----------
