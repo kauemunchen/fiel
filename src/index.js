@@ -85,7 +85,7 @@ app.get('/oauth/instagram/callback', async (req, res) => {
   try {
     const ig = await import('./integracoes/instagram-oauth.js'); const r = await ig.concluir(state, code); try { (await import('./integracoes/instagram-liberacao.js')).marcarConectado(r.contaId); } catch {}
     try { const { canalAtual } = await import('./canal/atual.js'); const dono = db.prepare("SELECT chat_id FROM usuarios WHERE conta_id=? AND papel='dono' ORDER BY canal<>'telegram', id LIMIT 1").get(r.contaId)?.chat_id; if (dono) canalAtual()?.enviar(null, dono, { texto: `📸 Instagram conectado: @${r.username}. A MIA já pode publicar. A conexão se renova sozinha.`, modulo: 'social' }).catch(() => {}); } catch {}
-    res.send(pagina(true, `✅ Instagram @${r.username} conectado`, 'Pode voltar ao Fiel.'));
+    res.send(pagina(true, `✅ Instagram @${r.username} conectado`, r.aviso ? `⚠️ ${r.aviso}` : 'Pode voltar ao Fiel.'));
   } catch (e) { console.error('[oauth] instagram:', e.message); res.status(500).send(pagina(false, 'Instagram não conectou', `${String(e.message).replace(/</g, '&lt;')}. Se o seu perfil ainda não foi liberado, peça ao suporte do Fiel para incluir o seu @ e aceite o convite no Instagram.`)); }
 });
 app.get('/oauth/google/callback', async (req, res) => {

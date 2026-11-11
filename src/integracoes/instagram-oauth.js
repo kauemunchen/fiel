@@ -45,8 +45,10 @@ export async function concluir(state, code) {
   const token = longo.access_token || tokCurto;
   const me = await fetch(`https://graph.instagram.com/me?fields=user_id,username,account_type&access_token=${encodeURIComponent(token)}`).then(r => r.json());
   if (me.error) throw new Error(`Meta: ${me.error.message}`);
+  if (String(me.account_type || '').toUpperCase() === 'PERSONAL') throw new Error(`O perfil @${me.username} é pessoal. Entre com o @ do perfil da EMPRESA (Profissional) na tela do Instagram — se o pessoal abrir sozinho, toque em "Trocar de conta"`);
   const expira = gravar(contaId, me.user_id || me.id || curto.user_id, token, longo.expires_in || 3600);
-  return { contaId, username: me.username, tipo: me.account_type, expira };
+  let aviso = null; try { const lib = db.prepare('SELECT arroba FROM ig_liberacoes WHERE conta_id=? AND status<>\'cancelado\' ORDER BY id DESC LIMIT 1').get(contaId)?.arroba; const a = String(lib || '').replace(/^@/, '').toLowerCase(); if (a && a !== String(me.username || '').toLowerCase()) aviso = `Conectou @${me.username}, mas o @ liberado era @${a}. Se não era este perfil, toque em Reconectar e entre com o @ certo.`; } catch {}
+  return { contaId, username: me.username, tipo: me.account_type, expira, aviso };
 }
 
 /** Renova tokens que vencem nos próximos 15 dias (o token precisa ter mais de 24 h e estar válido). */
