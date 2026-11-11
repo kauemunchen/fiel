@@ -243,3 +243,12 @@ export async function aplicarAlteracoes(contaId, { ids = 'todos', novos = 'todos
 }
 /** Descarta as edições da planilha: ela volta a espelhar o Fiel. */
 export async function descartarEdicoes(contaId) { db.prepare('UPDATE fin_espelho SET alterada=0 WHERE conta_id=?').run(contaId); return sincronizar(contaId, { forcar: true, ignorarEdicao: true }); }
+
+/** Confere agora se o dono editou a planilha (usado ao abrir o Financeiro). No máximo 1 leitura a cada 20 s por conta. */
+const ultimaChecagem = new Map();
+export async function verificarEdicao(contaId) {
+  const e = espelhoDe(contaId); if (!e) return false; if (e.alterada) return true;
+  if (Date.now() - (ultimaChecagem.get(contaId) || 0) < 20e3 || !e.hash_planilha) return false; ultimaChecagem.set(contaId, Date.now());
+  try { if (hashAba(await lerAba(contaId)) !== e.hash_planilha) { db.prepare('UPDATE fin_espelho SET alterada=1 WHERE conta_id=?').run(contaId); return true; } } catch {}
+  return false;
+}
