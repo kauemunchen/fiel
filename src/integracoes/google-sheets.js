@@ -2,6 +2,7 @@
 import { google } from 'googleapis';
 import { db } from '../db/index.js';
 import { extrairId } from './google-drive.js';
+export function sheetsDe(contaId) { return auth(contaId); }
 function auth(contaId) {
   const row = db.prepare('SELECT token_json FROM google_auth WHERE conta_id=?').get(contaId);
   if (!row) throw new Error('Google não conectado. Diga "conectar google".');

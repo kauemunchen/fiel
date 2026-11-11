@@ -513,7 +513,7 @@ telas.financeiro = async () => {
       <label class="fin-sel"><span>Visualizar</span><select id="finCart"><option value="">Geral · todas as carteiras</option>${optCart(false) ? `<optgroup label="Empresas (PJ)">${optCart(false)}</optgroup>` : ''}${optCart(true) ? `<optgroup label="Pessoa física (PF)">${optCart(true)}</optgroup>` : ''}</select></label>
       ${d.carteira && d.contas_carteira?.length ? `<label class="fin-sel"><span>Conta</span><select id="finConta"><option value="">Todas as contas</option>${d.contas_carteira.map(x => `<option value="${x.id}" ${d.conta_sel?.id === x.id ? 'selected' : ''}>${esc(x.rotulo)}</option>`).join('')}</select></label>` : ''}
     </div>
-    <div class="fin-dir"><button type="button" class="chip-link" id="finContas">Contas e cartões</button><button type="button" class="chip-link" id="finPlano">Plano de contas</button><label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div></div>`;
+    <div class="fin-dir"><button type="button" class="chip-link" id="finPlanilha">Planilha no Drive</button><button type="button" class="chip-link" id="finContas">Contas e cartões</button><button type="button" class="chip-link" id="finPlano">Plano de contas</button><label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div></div>`;
   if (d.vazio && !d.carteira) return { titulo: 'Financeiro', sub: `Painel gerencial da ${esc(nomeTina)}`, corpo: `<div class="cartao fin-vazio"><h3>Seu financeiro aparece aqui</h3><p class="d">Mande o extrato do banco (OFX ou CSV), uma foto de boleto ou nota, ou conte à ${esc(nomeTina)} o saldo atual. Ela organiza tudo e este painel se monta sozinho.</p><div class="h-acoes"><button class="btn-h pri" data-cmd="${esc(nomeTina)}, quero mandar o extrato do banco">Mandar extrato</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero informar o saldo atual da conta">Informar saldo</button></div></div>`,
     depois: () => document.querySelectorAll('.fin-vazio [data-cmd]').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); }) };
   const a = d.mes_atual, p = d.mes_anterior, delta = a.resultado - p.resultado;
@@ -545,6 +545,11 @@ telas.financeiro = async () => {
     const raiz = $('#tela-config'); raiz.classList.add('tela-fin'); ligarGraficos(raiz);
     $('#finCart').onchange = (e) => { finEstado.carteira = e.target.value; finEstado.conta = ''; mostrarTela('financeiro'); };
     $('#finConta') && ($('#finConta').onchange = (e) => { finEstado.conta = e.target.value; mostrarTela('financeiro'); });
+    $('#finPlanilha').onclick = async (e) => { const b = e.currentTarget; const w = window.open('', '_blank'); b.disabled = true; b.textContent = 'Preparando…';
+      const st = await api('/api/fin/espelho').catch(() => ({}));
+      const r = st.ativo ? (post('/api/fin/espelho', {}).catch(() => {}), st) : await post('/api/fin/espelho', {}).catch(() => null);
+      b.disabled = false; b.textContent = 'Planilha no Drive';
+      if (r?.link) { if (w) w.location = r.link; else window.open(r.link, '_blank'); toast(st.ativo ? 'Abrindo a planilha (atualizando agora)' : 'Planilha criada no seu Drive'); } else if (w) w.close(); };
     $('#finContas').onclick = () => { cfEstado.carteira = finEstado.carteira || ''; mostrarTela('contasfin'); };
     $('#finPlano').onclick = () => { planoEstado.carteira = finEstado.carteira || ''; mostrarTela('plano'); };
     $('#finMes').onchange = (e) => { finEstado.mes = e.target.value; mostrarTela('financeiro'); };

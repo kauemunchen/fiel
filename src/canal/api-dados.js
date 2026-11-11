@@ -301,6 +301,13 @@ export function rotasDados(app) {
     if (usos) { db.prepare('UPDATE fin_contas SET ativo=0 WHERE id=?').run(x.id); return res.json({ ok: true, desativada: true, usos }); }
     db.prepare('DELETE FROM fin_contas WHERE id=?').run(x.id); db.prepare('DELETE FROM fin_saldos WHERE conta_id=? AND conta_fin_id=?').run(id, x.id); res.json({ ok: true, removida: true });
   });
+  app.get('/api/fin/espelho', auth, async (req, res) => { const E = await import('../ferramentas/espelho-fin.js'); const e = E.espelhoDe(req.contaId); res.json(e ? { ativo: true, link: `https://docs.google.com/spreadsheets/d/${e.spreadsheet_id}/edit`, sincronizado_em: e.sincronizado_em, erro: e.erro } : { ativo: false }); });
+  app.post('/api/fin/espelho', auth, async (req, res) => {
+    const E = await import('../ferramentas/espelho-fin.js');
+    try { const r = E.espelhoDe(req.contaId) ? await E.sincronizar(req.contaId, { forcar: true }) : await E.criarEspelho(req.contaId); if (r.ok === false) return res.status(400).json({ erro: r.erro });
+      const e = E.espelhoDe(req.contaId); res.json({ ok: true, link: `https://docs.google.com/spreadsheets/d/${e.spreadsheet_id}/edit` }); }
+    catch (err) { res.status(400).json({ erro: /conectado|autoriza|conectar google/i.test(err.message) ? 'Conecte o Google primeiro (Mais › Conexões).' : String(err.message).slice(0, 200) }); }
+  });
   app.post('/api/fin/saldo', auth, async (req, res) => {
     const id = req.contaId; const b = req.body || {}; const x = db.prepare('SELECT * FROM fin_contas WHERE id=? AND conta_id=?').get(Number(b.conta_fin_id), id);
     if (!x || /cartao/.test(x.tipo)) return res.status(400).json({ erro: 'saldo só para conta bancária ou dinheiro' });

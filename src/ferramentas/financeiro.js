@@ -234,6 +234,7 @@ export function ferramentas(_conta) {
     { name: 'importar_extrato_pendente', description: 'Importa um extrato que já foi lido e estava aguardando o dono dizer a carteira.', parameters: obj({ importacao_id: N, carteira: S }, ['importacao_id', 'carteira']) },
     { name: 'listar_contas_financeiras', description: 'Lista contas bancárias, cartões (crédito/débito) e dinheiro de cada carteira, com saldo (banco/dinheiro) e fatura aberta (cartão de crédito).', parameters: obj({ carteira: S }) },
     { name: 'transferencia_entre_contas', description: 'Registra dinheiro que passou de uma conta para outra do próprio dono (ex.: "transferi 18 mil do BB para o Porto Seguro", "saquei 500", "depositei no Itaú"). NÃO é receita nem despesa: o saldo total não muda, só sai de uma conta e entra na outra. Use SEMPRE isto em vez de registrar_lancamento para transferências. Contas que ainda não existem na carteira são cadastradas como conta bancária ("dinheiro"/"carteira" vira Dinheiro). Se as contas forem de carteiras diferentes (ex.: da empresa para a pessoal), informe carteira_destino.', parameters: obj({ carteira: S, de: S, para: S, valor: N, data: S, carteira_destino: S, descricao: S }, ['carteira', 'de', 'para', 'valor']) },
+    { name: 'planilha_espelho', description: 'Cria (ou atualiza agora) a planilha "Fiel · Espelho financeiro" no Google Drive do dono: todos os lançamentos de todas as carteiras, com painel e filtros por carteira, mês e conta. Ela se atualiza sozinha depois. Use quando o dono pedir planilha, espelho ou exportar o financeiro.', parameters: obj({}, []) },
     { name: 'ficha_carteira', description: 'Define se a carteira é de uma empresa (pj) ou de uma pessoa (pf) e o titular (razão social ou nome completo). Use quando o dono disser de quem é a carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['pj', 'pf'] }, titular: S }, ['carteira', 'tipo']) },
     { name: 'cadastrar_conta_financeira', description: 'Cadastra uma conta bancária, cartão de crédito, cartão de débito ou dinheiro numa carteira. Cartão de crédito: informe dia_fechamento e dia_vencimento. O dono também cadastra no painel: Mais › Contas e cartões.', parameters: obj({ carteira: S, nome: S, tipo: { type: 'STRING', enum: ['banco', 'cartao_credito', 'cartao_debito', 'dinheiro', 'outro'] }, instituicao: S, final: S, limite: N, dia_fechamento: N, dia_vencimento: N }, ['carteira', 'nome', 'tipo']) },
     { name: 'pagar_fatura_cartao', description: 'Dá baixa na fatura de um cartão de crédito (todas as compras daquele vencimento), quando o dono disser que pagou. pago_com = conta bancária de onde saiu o dinheiro.', parameters: obj({ cartao: S, carteira: S, vencimento: S, pago_com: S, comprovante: S }, ['cartao']) },
@@ -248,6 +249,7 @@ export function ferramentas(_conta) {
 export async function executar(nome, a, conta) {
   if (['transferir', 'pagar', 'pix', 'ted'].includes(nome)) throw new Error('Este módulo nunca movimenta dinheiro.');
   const c = conta.id;
+  if (!/^(listar|gerar|contas_em|fluxo)/.test(nome)) import('./espelho-fin.js').then(m => m.agendarEspelho(c)).catch(() => {});
   switch (nome) {
     case 'definir_carteiras': {
       const lista = [...new Set((a.carteiras || []).map(x => String(x).trim()).filter(Boolean))]; if (!lista.length) throw new Error('informe ao menos uma carteira');
@@ -351,6 +353,7 @@ export async function executar(nome, a, conta) {
         efeito: mesma ? 'saldo total da carteira não muda; não entra como receita nem despesa' : `sai de ${cart} como ${catS} e entra em ${cartD} como ${catE}`,
         contas_criadas: [o, d].filter(x => x.nova).map(x => CF.rotuloConta(x.conta)), dica: [o, d].some(x => x.nova) ? 'Contas novas foram cadastradas sem saldo; o dono pode informar o saldo de cada uma em Mais › Contas e cartões.' : undefined };
     }
+    case 'planilha_espelho': { const E = await import('./espelho-fin.js'); const r = await E.criarEspelho(c); return { ...r, dica: 'A planilha se atualiza sozinha cerca de 1 minuto depois de cada lançamento. Abas: Painel (filtros), Lançamentos, Contas.' }; }
     case 'ficha_carteira': { const cart = resolverCarteira(c, a.carteira); CF.salvarFicha(c, cart, { tipo: a.tipo, titular: a.titular }); return { ok: true, carteira: cart, ...CF.fichaCarteira(c, cart) }; }
     case 'cadastrar_conta_financeira': {
       const cart = resolverCarteira(c, a.carteira); if (!CF.TIPOS[a.tipo]) throw new Error('tipo inválido');

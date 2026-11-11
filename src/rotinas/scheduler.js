@@ -144,6 +144,7 @@ export function iniciarRotinas(canal) {
   cron.schedule('0 8 * * *', () => avisarVencimentos(canal), { timezone: TZ });
   cron.schedule('40 10 * * *', () => import('../orquestrador/guia.js').then(g => g.enviarDicasDoGuia(canal)).catch(e => console.error('[guia]', e.message)), { timezone: TZ });
   cron.schedule('5 8 * * *', () => avisarFinanceiro(canal), { timezone: TZ });
+  cron.schedule('*/15 * * * *', () => import('../ferramentas/espelho-fin.js').then(m => m.sincronizarTodos()).catch(e => console.error('[espelho]', e.message)), { timezone: TZ });
   cron.schedule('5 8 * * *', () => avisarTokenInstagram(canal), { timezone: TZ });
   cron.schedule('0 3 * * *', () => limparBiblioteca(canal).catch(e => console.error('limparBiblioteca', e.message)), { timezone: TZ });
   cron.schedule('0 9 * * 1', () => avisarAdminsInativas().catch(e => console.error('inativas', e.message)), { timezone: TZ });
