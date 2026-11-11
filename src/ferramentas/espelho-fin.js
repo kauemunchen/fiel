@@ -115,7 +115,8 @@ export async function criarEspelho(contaId) {
 export async function sincronizar(contaId, { forcar = false, ignorarEdicao = false } = {}) {
   const e = espelhoDe(contaId); if (!e) return { ok: false, erro: 'sem espelho' };
   // O dono editou a aba Lançamentos? Não sobrescreve: espera ele revisar (aplicar ou descartar) no Fiel.
-  if (!ignorarEdicao && e.hash_planilha) { try { const h = hashAba(await lerAba(contaId)); if (h !== e.hash_planilha) { if (!e.alterada) db.prepare('UPDATE fin_espelho SET alterada=1 WHERE conta_id=?').run(contaId); return { ok: true, editada_pelo_dono: true }; } } catch {} }
+  if (!ignorarEdicao && e.hash_planilha) { try { const h = hashAba(await lerAba(contaId)); if (h !== e.hash_planilha || e.alterada) { db.prepare('UPDATE fin_espelho SET alterada=1 WHERE conta_id=?').run(contaId);
+    if (e.snapshot) { const r = await autoAplicar(contaId); if (!r.pendentes && r.ok !== false) return { ok: true, mesclado: true }; } return { ok: true, editada_pelo_dono: true }; } } catch {} }
   if (e.alterada && !ignorarEdicao) return { ok: true, editada_pelo_dono: true };
   const { linhas } = dados(contaId); const contas = await contasLinhas(contaId);
   const assin = crypto.createHash('md5').update(JSON.stringify([linhas, contas])).digest('hex');
@@ -139,6 +140,8 @@ export async function sincronizar(contaId, { forcar = false, ignorarEdicao = fal
       await svc.spreadsheets.batchUpdate({ spreadsheetId: id, requestBody: { requests: [dv(3, ['Todas', ...carts]), dv(4, ['Todos', ...meses]), dv(5, ['Todas', ...nomesC])] } });
     }
     let hp = null; try { hp = hashAba(await lerAba(contaId)); } catch {}
+    const snap = JSON.stringify(Object.fromEntries(linhas.map(r => [r[0], r.map(c => typeof c === 'string' && c.startsWith("'") ? c.slice(1) : c)])));
+    try { db.prepare('UPDATE fin_espelho SET snapshot=? WHERE conta_id=?').run(snap, contaId); } catch {}
     db.prepare('UPDATE fin_espelho SET assinatura=?, hash_planilha=?, alterada=0, sincronizado_em=CURRENT_TIMESTAMP, erro=NULL WHERE conta_id=?').run(assin, hp, contaId);
     return { ok: true, linhas: linhas.length, link: link(id) };
   } catch (err) {
@@ -161,6 +164,7 @@ export async function sincronizarTodos() {
 // ---------- Mão contrária: alterações feitas na planilha → Fiel (sempre com revisão e confirmação) ----------
 try { db.exec('ALTER TABLE fin_espelho ADD COLUMN hash_planilha TEXT'); } catch {}
 try { db.exec('ALTER TABLE fin_espelho ADD COLUMN alterada INTEGER DEFAULT 0'); } catch {}
+try { db.exec('ALTER TABLE fin_espelho ADD COLUMN snapshot TEXT'); } catch {}
 const deSerial = (v) => { if (v === '' || v == null) return null; if (typeof v === 'number') return new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 864e5).toISOString().slice(0, 10);
   const s = String(v).trim(); let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : 'inválida'; };
 const num = (v) => typeof v === 'number' ? v : Number(String(v || '').replace(/[R$\s]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
@@ -180,6 +184,9 @@ export async function alteracoesPlanilha(contaId) {
   const mapa = new Map(db.prepare('SELECT * FROM fin_lancamentos WHERE conta_id=? AND oculto=0').all(contaId).map(l => [l.id, l]));
   const contas = CF.listarContasFin(contaId, null, { todas: true });
   const mudancas = [], novos = [], erros = [], vistos = new Set();
+  let snap = null; try { snap = JSON.parse(espelhoDe(contaId)?.snapshot || 'null'); } catch {}
+  const COL = { data: 1, vencimento: 3, carteira: 4, tipo: 6, status: 7, descricao: 8, contraparte: 9, categoria: 10, plano: 11, conta: 12, valor: 13 };
+  const nc = (v) => typeof v === 'number' ? v.toFixed(2) : String(v ?? '').trim();
   const STI = { pago: 'pago', previsto: 'previsto', pendente: 'pendente' };
   linhas.forEach((r, i) => {
     const lin = i + 2; const id = Number(r[0]) || null; const g = (k) => String(r[k] ?? '').trim();
@@ -197,22 +204,29 @@ export async function alteracoesPlanilha(contaId) {
         carteira: l.carteira, tipo: l.tipo, status: l.status, descricao: l.descricao || '', contraparte: l.contraparte || '', categoria: l.categoria || 'Sem categoria',
         plano: /^\d+(\.\d+)*\s/.test(l.subcategoria || '') ? l.subcategoria : '', conta_fin_id: l.conta_fin_id || l.pago_com_id || null, valor: +Number(l.valor).toFixed(2),
         data: l.status === 'pago' ? (l.pago_em || l.data) : (l.vencimento || l.data), vencimento: l.vencimento || null };
-      const campos = []; const cmp = (k, rot, a, b) => { if (String(a ?? '') !== String(b ?? '')) campos.push({ campo: k, rotulo: rot, de: a ?? '', para: b ?? '' }); };
+      const sn = snap?.[id]; // o que o Fiel escreveu da última vez: só conta como mudança do dono o campo que ele mexeu na planilha
+      const mexeu = (k) => !sn || (k === 'categoria' ? nc(r[10]) !== nc(sn[10]) || nc(r[11]) !== nc(sn[11]) : nc(r[COL[k]]) !== nc(sn[COL[k]]));
+      const campos = []; const cmp = (k, rot, a, b) => { if (mexeu(k === 'plano' ? 'categoria' : k) && String(a ?? '') !== String(b ?? '')) campos.push({ campo: k, rotulo: rot, de: a ?? '', para: b ?? '' }); };
       cmp('carteira', 'Carteira', atual.carteira, alvo.carteira); cmp('tipo', 'Tipo', atual.tipo, alvo.tipo); cmp('status', 'Status', atual.status, alvo.status);
       cmp('descricao', 'Descrição', atual.descricao, alvo.descricao); cmp('contraparte', 'Contraparte', atual.contraparte, alvo.contraparte);
       cmp('valor', 'Valor', atual.valor, alvo.valor); cmp('data', 'Data', atual.data, alvo.data); cmp('vencimento', 'Vencimento', atual.vencimento, alvo.vencimento);
       if (alvo.plano !== atual.plano && alvo.plano) cmp('plano', 'Conta do plano', atual.plano, alvo.plano); else if (alvo.categoria !== atual.categoria) cmp('categoria', 'Categoria', atual.categoria, alvo.categoria);
       const cfAtual = atual.conta_fin_id ? CF.rotuloConta(contas.find(c => c.id === atual.conta_fin_id) || { nome: '?' }) : ''; if ((cf?.id || null) !== atual.conta_fin_id) cmp('conta', 'Conta/cartão', cfAtual, cf ? CF.rotuloConta(cf) : '');
-      if (campos.length) mudancas.push({ id, linha: lin, descricao: alvo.descricao, campos, alvo: { ...alvo, conta_fin_id: cf?.id || null } });
+      // Campo que o dono não mexeu fica como está no Fiel (o Fiel pode ter mudado depois da última atualização da planilha).
+      const fim = { ...alvo, conta_fin_id: cf?.id || null }; const mudou = new Set(campos.map(c => c.campo));
+      for (const k of ['carteira', 'tipo', 'status', 'descricao', 'contraparte', 'valor', 'data', 'vencimento']) if (!mudou.has(k)) fim[k] = atual[k];
+      if (!mudou.has('plano') && !mudou.has('categoria')) { fim.categoria = atual.categoria; fim.plano = atual.plano; }
+      if (!mudou.has('conta')) fim.conta_fin_id = atual.conta_fin_id;
+      if (campos.length) mudancas.push({ id, linha: lin, descricao: fim.descricao, campos, alvo: fim });
     } else if (!id && alvo.descricao) novos.push({ linha: lin, descricao: alvo.descricao, alvo: { ...alvo, conta_fin_id: cf?.id || null } });
     else if (id) erros.push({ linha: lin, id, descricao: alvo.descricao, erros: ['ID não existe no Fiel (apague o ID para lançar como novo)'] });
   });
-  const removidos = [...mapa.values()].filter(l => !vistos.has(l.id)).map(l => ({ id: l.id, descricao: l.descricao, valor: l.valor, carteira: l.carteira, tipo: l.tipo }));
-  return { mudancas, novos, removidos, erros, total: mudancas.length + novos.length + removidos.length };
+  const removidos = [...mapa.values()].filter(l => !vistos.has(l.id) && (!snap || snap[l.id])).map(l => ({ id: l.id, descricao: l.descricao, valor: l.valor, carteira: l.carteira, tipo: l.tipo }));
+  return { mudancas, novos, removidos, erros, total: mudancas.length + novos.length + removidos.length, com_base: !!snap };
 }
 
 /** Aplica as alterações escolhidas (ids de mudanças, linhas de novos, ids a remover). Remover = ocultar (reversível). */
-export async function aplicarAlteracoes(contaId, { ids = 'todos', novos = 'todos', remover = [] } = {}) {
+export async function aplicarAlteracoes(contaId, { ids = 'todos', novos = 'todos', remover = [], semSincronizar = false } = {}) {
   const PL = await import('./plano-contas.js'); const a = await alteracoesPlanilha(contaId); let alt = 0, cri = 0, rem = 0;
   const quer = (lista, v) => lista === 'todos' || (Array.isArray(lista) && lista.map(Number).includes(Number(v)));
   db.transaction(() => {
@@ -237,8 +251,7 @@ export async function aplicarAlteracoes(contaId, { ids = 'todos', novos = 'todos
     }
     for (const r of a.removidos.filter(r => quer(remover, r.id))) { db.prepare("UPDATE fin_lancamentos SET oculto=1, comprovante=COALESCE(comprovante,'') || ' [removido pela planilha]' WHERE id=? AND conta_id=?").run(r.id, contaId); rem++; }
   })();
-  db.prepare('UPDATE fin_espelho SET alterada=0 WHERE conta_id=?').run(contaId);
-  await sincronizar(contaId, { forcar: true, ignorarEdicao: true });
+  if (!semSincronizar) { db.prepare('UPDATE fin_espelho SET alterada=0 WHERE conta_id=?').run(contaId); await sincronizar(contaId, { forcar: true, ignorarEdicao: true }); }
   return { ok: true, alterados: alt, criados: cri, removidos: rem, erros: a.erros };
 }
 /** Descarta as edições da planilha: ela volta a espelhar o Fiel. */
@@ -247,8 +260,25 @@ export async function descartarEdicoes(contaId) { db.prepare('UPDATE fin_espelho
 /** Confere agora se o dono editou a planilha (usado ao abrir o Financeiro). No máximo 1 leitura a cada 20 s por conta. */
 const ultimaChecagem = new Map();
 export async function verificarEdicao(contaId) {
-  const e = espelhoDe(contaId); if (!e) return false; if (e.alterada) return true;
-  if (Date.now() - (ultimaChecagem.get(contaId) || 0) < 20e3 || !e.hash_planilha) return false; ultimaChecagem.set(contaId, Date.now());
-  try { if (hashAba(await lerAba(contaId)) !== e.hash_planilha) { db.prepare('UPDATE fin_espelho SET alterada=1 WHERE conta_id=?').run(contaId); return true; } } catch {}
+  const e = espelhoDe(contaId); if (!e) return false;
+  if (Date.now() - (ultimaChecagem.get(contaId) || 0) < 20e3 || !e.hash_planilha) return !!e.alterada; ultimaChecagem.set(contaId, Date.now());
+  try { if (e.alterada || hashAba(await lerAba(contaId)) !== e.hash_planilha) { db.prepare('UPDATE fin_espelho SET alterada=1 WHERE conta_id=?').run(contaId); await autoAplicar(contaId); return !!espelhoDe(contaId)?.alterada; } } catch {}
   return false;
 }
+/**
+ * Edição na planilha entra sozinha no Fiel: alterações (só os campos que o dono mexeu) e linhas novas.
+ * Linhas apagadas ou com erro ficam esperando revisão (aviso no Financeiro). Sem base anterior, também espera revisão.
+ */
+export async function autoAplicar(contaId) {
+  const e = espelhoDe(contaId); if (!e?.snapshot) return { ok: false, motivo: 'sem base' };
+  const a = await alteracoesPlanilha(contaId); if (!a.com_base) return { ok: false };
+  const pend = a.removidos.length || a.erros.length;
+  if (a.mudancas.length || a.novos.length) {
+    const r = await aplicarAlteracoes(contaId, { ids: 'todos', novos: pend ? [] : 'todos', remover: [], semSincronizar: !!pend });
+    if (pend) db.prepare('UPDATE fin_espelho SET alterada=1 WHERE conta_id=?').run(contaId);
+    return { ...r, pendentes: pend };
+  }
+  if (!pend) await sincronizar(contaId, { forcar: true, ignorarEdicao: true }); // mexeu só em colunas calculadas: regrava
+  return { ok: true, pendentes: pend };
+}
+export async function verificarTodos() { for (const { conta_id } of db.prepare('SELECT conta_id FROM fin_espelho').all()) { ultimaChecagem.delete(conta_id); try { await verificarEdicao(conta_id); } catch (err) { console.error('[espelho] verificar', err.message); } } }
