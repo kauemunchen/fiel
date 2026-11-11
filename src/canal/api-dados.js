@@ -183,14 +183,18 @@ export function rotasDados(app) {
     const cart = req.query.carteira && todas.includes(req.query.carteira) ? req.query.carteira : null;
     const carts = cart ? [cart] : todas;
     const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : hoje.slice(0, 7);
-    const cond = cart ? ' AND carteira=?' : ''; const ca = cart ? [cart] : [];
+    const CFm = await import('../ferramentas/contas-fin.js');
+    const contaSel = cart && req.query.conta ? db.prepare('SELECT * FROM fin_contas WHERE id=? AND conta_id=? AND carteira=?').get(Number(req.query.conta), id, cart) : null;
+    const cond = (cart ? ' AND carteira=?' : '') + (contaSel ? (/cartao_credito/.test(contaSel.tipo) ? ' AND conta_fin_id=?' : ' AND COALESCE(pago_com_id, conta_fin_id)=?') : ''); const ca = [...(cart ? [cart] : []), ...(contaSel ? [contaSel.id] : [])];
+    const condP = (cart ? ' AND carteira=?' : '') + (contaSel ? ' AND conta_fin_id=?' : '');
     const efet = 'COALESCE(pago_em, data)'; const semTransf = "AND COALESCE(categoria,'')<>'Transferência'";
     const r2 = (v) => +Number(v || 0).toFixed(2);
     const totMes = (m) => { const r = db.prepare(`SELECT COALESCE(SUM(CASE WHEN tipo='entrada' THEN valor END),0) ent, COALESCE(SUM(CASE WHEN tipo='saida' THEN valor END),0) sai, COUNT(*) n FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 ${semTransf} AND substr(${efet},1,7)=?`).get(id, ...ca, m); return { recebido: r2(r.ent), pago: r2(r.sai), resultado: r2(r.ent - r.sai), lancamentos: r.n }; };
     const atual = totMes(mes), anterior = totMes(mesAnt(mes));
-    const saldos = carts.map(c => ({ carteira: c, ...F.saldoAtual(id, c) }));
+    const saldos = contaSel ? [{ carteira: CFm.rotuloConta(contaSel), ...(/cartao/.test(contaSel.tipo) ? { saldo: 0, tem_saldo_inicial: true, base: 'cartão: veja a fatura' } : (s => ({ saldo: s.saldo, tem_saldo_inicial: s.informado, base: s.informado ? `saldo informado em ${s.data_base}` : 'saldo ainda não informado' }))(CFm.saldoContaFin(id, contaSel.id))) }]
+      : carts.map(c => ({ carteira: c, ...F.saldoAtual(id, c) }));
     const saldoHoje = r2(saldos.reduce((a, s) => a + s.saldo, 0));
-    const prev = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, categoria, COALESCE(vencimento,data) venc, documento FROM fin_lancamentos WHERE conta_id=?${cond} AND status IN ('previsto','pendente') AND oculto=0 ORDER BY venc`).all(id, ...ca);
+    const prev = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, categoria, COALESCE(vencimento,data) venc, documento FROM fin_lancamentos WHERE conta_id=?${cond} AND status IN ('previsto','pendente') AND oculto=0 ORDER BY venc`.replace('conta_id=?' + cond, 'conta_id=?' + condP)).all(id, ...ca);
     const ate = (d) => prev.filter(p => p.venc <= d);
     const somaT = (l, t) => r2(l.filter(p => p.tipo === t).reduce((a, p) => a + p.valor, 0));
     const atras = prev.filter(p => p.venc < hoje);
@@ -207,12 +211,14 @@ export function rotasDados(app) {
     const PLm = await import('../ferramentas/plano-contas.js'); const usaPlano = cart && PLm.planoAtivo(id, cart);
     const categorias = db.prepare(`SELECT ${usaPlano ? "COALESCE(subcategoria, categoria, 'Sem conta')" : "COALESCE(categoria,'Sem categoria')"} categoria, SUM(valor) total FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 AND tipo='saida' ${semTransf} AND substr(${efet},1,7)=? GROUP BY 1 ORDER BY total DESC LIMIT 6`).all(id, ...ca, mes).map(c => ({ categoria: c.categoria, total: r2(c.total) }));
     const ultimos = db.prepare(`SELECT id, carteira, tipo, valor, descricao, contraparte, categoria, ${efet} quando FROM fin_lancamentos WHERE conta_id=?${cond} AND status='pago' AND oculto=0 ORDER BY ${efet} DESC, id DESC LIMIT 10`).all(id, ...ca);
-    res.json({ hoje, mes, carteira: cart, carteiras: todas, usa_plano: !!usaPlano, vazio: !prev.length && !ultimos.length && !saldos.some(s => s.tem_saldo_inicial),
+    res.json({ hoje, mes, carteira: cart, carteiras: todas, conta_sel: contaSel ? { id: contaSel.id, rotulo: CFm.rotuloConta(contaSel), tipo: contaSel.tipo } : null,
+      fichas: todas.map(c => { const f = CFm.fichaCarteira(id, c); return { carteira: c, pf: f.pf, titular: f.titular }; }),
+      contas_carteira: cart ? CFm.listarContasFin(id, cart).map(x => ({ id: x.id, rotulo: CFm.rotuloConta(x), tipo: x.tipo })) : [], usa_plano: !!usaPlano, vazio: !prev.length && !ultimos.length && !saldos.some(s => s.tem_saldo_inicial),
       saldo: { hoje: saldoHoje, por_carteira: saldos.map(s => ({ carteira: s.carteira, saldo: s.saldo, base: s.base })) },
       mes_atual: atual, mes_anterior: { mes: mesAnt(mes), ...anterior },
       abertos: { a_receber_30: somaT(p30, 'entrada'), a_pagar_30: somaT(p30, 'saida'), atrasado_receber: somaT(atras, 'entrada'), atrasado_pagar: somaT(atras, 'saida'), n_atrasados: atras.length },
       previsao: { d30: proj(30), d60: proj(60), d90: proj(90), menor: minimo, serie },
-      contas_fin: await (async () => { const CF = await import('../ferramentas/contas-fin.js'); return CF.listarContasFin(id, cart).map(x => ({ id: x.id, carteira: x.carteira, rotulo: CF.rotuloConta(x), tipo: x.tipo, limite: x.limite, ...(x.tipo === 'cartao_credito' ? { faturas: CF.faturasCartao(id, x.id).slice(0, 2) } : x.tipo === 'cartao_debito' ? {} : { saldo: CF.saldoContaFin(id, x.id) }) })); })(),
+      contas_fin: await (async () => { const CF = await import('../ferramentas/contas-fin.js'); return CF.listarContasFin(id, cart).filter(x => !contaSel || x.id === contaSel.id).map(x => ({ id: x.id, carteira: x.carteira, rotulo: CF.rotuloConta(x), tipo: x.tipo, limite: x.limite, ...(x.tipo === 'cartao_credito' ? { faturas: CF.faturasCartao(id, x.id).slice(0, 2) } : x.tipo === 'cartao_debito' ? {} : { saldo: CF.saldoContaFin(id, x.id) }) })); })(),
       historico, categorias, ultimos,
       vencimentos: prev.filter(p => p.venc <= soma(hoje, 30)).slice(0, 12).map(p => ({ ...p, atrasado: p.venc < hoje, hoje: p.venc === hoje })) });
   });
@@ -266,12 +272,15 @@ export function rotasDados(app) {
   });
 
   // ---------- Carteiras e contas financeiras (bancos, cartões, dinheiro) ----------
-  const ehPFc = (c) => /pessoal|\bpf\b|casa|fam[ií]lia|particular/i.test(c || '');
   app.get('/api/fin/contas', auth, async (req, res) => {
-    const CF = await import('../ferramentas/contas-fin.js'); const id = req.contaId; const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
-    const carteiras = (await carteirasConta(id)).map(c => ({ carteira: c, pf: ehPFc(c), lancamentos: db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND carteira=?').get(id, c).n,
-      contas: CF.listarContasFin(id, c, { todas: true }).map(x => ({ ...x, rotulo: CF.rotuloConta(x), tipo_nome: CF.TIPOS[x.tipo], usos: db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND (conta_fin_id=? OR pago_com_id=?)').get(id, x.id, x.id).n,
-        ...(x.tipo === 'cartao_credito' ? { faturas: CF.faturasCartao(id, x.id) } : x.tipo === 'cartao_debito' ? {} : { saldo: CF.saldoContaFin(id, x.id) }) })) }));
+    const CF = await import('../ferramentas/contas-fin.js'); const F = await import('../ferramentas/financeiro.js'); const PL = await import('../ferramentas/plano-contas.js');
+    const id = req.contaId; const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10); const empresas = F.empresasDe(id);
+    const carteiras = (await carteirasConta(id)).map(c => { const f = CF.fichaCarteira(id, c); const cfg = PL.cfgPlano(id, c);
+      return { carteira: c, pf: f.pf, tipo: f.tipo, titular: f.titular, documento: f.documento, empresa_cadastrada: empresas.some(e => e === c),
+        saldo: F.saldoAtual(id, c), plano: cfg?.ativo ? (PL.MODELOS[cfg.modelo]?.nome || 'personalizado') : null,
+        lancamentos: db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND carteira=?').get(id, c).n,
+        contas: CF.listarContasFin(id, c, { todas: true }).map(x => ({ ...x, rotulo: CF.rotuloConta(x), tipo_nome: CF.TIPOS[x.tipo], usos: db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND (conta_fin_id=? OR pago_com_id=?)').get(id, x.id, x.id).n,
+          ...(x.tipo === 'cartao_credito' ? { faturas: CF.faturasCartao(id, x.id) } : x.tipo === 'cartao_debito' ? {} : { saldo: CF.saldoContaFin(id, x.id) }) })) }; });
     res.json({ hoje, carteiras, tipos: CF.TIPOS });
   });
   app.post('/api/fin/contas', auth, async (req, res) => {
@@ -300,20 +309,30 @@ export function rotasDados(app) {
     db.prepare('INSERT INTO fin_saldos (conta_id, carteira, saldo, data, conta_fin_id) VALUES (?,?,?,?,?)').run(id, x.carteira, v, hoje, x.id); res.json({ ok: true });
   });
   app.post('/api/fin/carteiras', auth, async (req, res) => {
-    const id = req.contaId; const b = req.body || {};
-    const lista = await carteirasConta(id); const nome = String(b.nome || '').trim().slice(0, 50);
-    const gravar = (l) => db.prepare('UPDATE contas SET carteiras=? WHERE id=?').run(l.join(', '), id);
-    if (b.acao === 'adicionar') { if (!nome) return res.status(400).json({ erro: 'dê um nome (ex.: Mais Têxtil, Pessoal)' }); if (lista.some(c => c.toLowerCase() === nome.toLowerCase())) return res.status(400).json({ erro: 'essa carteira já existe' }); gravar([...lista, nome]); return res.json({ ok: true }); }
+    const CF = await import('../ferramentas/contas-fin.js'); const F = await import('../ferramentas/financeiro.js');
+    const id = req.contaId; const b = req.body || {}; const lista = await carteirasConta(id); const nome = String(b.nome || '').trim().slice(0, 50);
+    const sa = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+    const row = db.prepare('SELECT carteiras, empresas FROM contas WHERE id=?').get(id) || {};
+    const propria = String(row.carteiras || '').split(/[,;\n]/).map(x => x.trim()).filter(Boolean); let emp = F.empresasDe(id);
+    const gravar = () => db.prepare('UPDATE contas SET carteiras=?, empresas=? WHERE id=?').run(propria.join(', '), JSON.stringify(emp), id);
+    if (b.acao === 'adicionar') {
+      if (!nome) return res.status(400).json({ erro: 'dê um nome (a empresa ou a pessoa)' }); if (lista.some(c => sa(c) === sa(nome))) return res.status(400).json({ erro: 'essa carteira já existe' });
+      if (b.tipo === 'pf') propria.push(nome); else emp.push(nome); // empresa entra também em Conexões › Empresas (pastas de documentos)
+      gravar(); CF.salvarFicha(id, nome, { tipo: b.tipo === 'pf' ? 'pf' : 'pj', titular: b.titular, documento: b.documento }); return res.json({ ok: true });
+    }
     if (!lista.includes(b.carteira)) return res.status(400).json({ erro: 'carteira não encontrada' });
+    if (b.acao === 'ficha') { CF.salvarFicha(id, b.carteira, { tipo: b.tipo, titular: b.titular, documento: b.documento });
+      if (b.tipo === 'pj' && !emp.includes(b.carteira)) { emp.push(b.carteira); gravar(); } return res.json({ ok: true }); }
     if (b.acao === 'renomear') {
-      if (!nome || lista.includes(nome)) return res.status(400).json({ erro: 'nome inválido ou já usado' });
-      db.transaction(() => { for (const t of ['fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_contas', 'fin_plano', 'fin_plano_cfg', 'fin_importacoes']) { try { db.prepare(`UPDATE ${t} SET carteira=? WHERE conta_id=? AND carteira=?`).run(nome, id, b.carteira); } catch {} } gravar(lista.map(c => c === b.carteira ? nome : c)); })();
+      if (!nome || lista.some(c => sa(c) === sa(nome) && c !== b.carteira)) return res.status(400).json({ erro: 'nome inválido ou já usado' });
+      db.transaction(() => { for (const t of ['fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_contas', 'fin_plano', 'fin_plano_cfg', 'fin_importacoes', 'fin_carteiras']) { try { db.prepare(`UPDATE ${t} SET carteira=? WHERE conta_id=? AND carteira=?`).run(nome, id, b.carteira); } catch {} }
+        const tr = (l) => l.map(c => c === b.carteira ? nome : c); propria.splice(0, propria.length, ...tr(propria)); emp = tr(emp); gravar(); })();
       return res.json({ ok: true });
     }
     if (b.acao === 'remover') {
       const n = db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND carteira=?').get(id, b.carteira).n; if (n) return res.status(400).json({ erro: `a carteira tem ${n} lançamentos; não dá para remover` });
-      for (const t of ['fin_saldos', 'fin_regras', 'fin_contas', 'fin_plano', 'fin_plano_cfg']) { try { db.prepare(`DELETE FROM ${t} WHERE conta_id=? AND carteira=?`).run(id, b.carteira); } catch {} }
-      gravar(lista.filter(c => c !== b.carteira)); return res.json({ ok: true });
+      for (const t of ['fin_saldos', 'fin_regras', 'fin_contas', 'fin_plano', 'fin_plano_cfg', 'fin_carteiras']) { try { db.prepare(`DELETE FROM ${t} WHERE conta_id=? AND carteira=?`).run(id, b.carteira); } catch {} }
+      propria.splice(0, propria.length, ...propria.filter(c => c !== b.carteira)); emp = emp.filter(c => c !== b.carteira); gravar(); return res.json({ ok: true });
     }
     res.status(400).json({ erro: 'ação inválida' });
   });

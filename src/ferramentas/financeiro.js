@@ -26,7 +26,7 @@ prepararFinanceiro();
 // ---------- plano de contas KM ----------
 export const PLANO_PJ = ['Receita operacional', 'Outras receitas', 'Custos variáveis', 'Despesas fixas', 'Despesas financeiras', 'Investimentos', 'Retiradas'];
 export const PLANO_PF = ['Renda', 'Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Educação', 'Lazer', 'Assinaturas', 'Outros'];
-const ehPF = (carteira) => /pessoal|\bpf\b|casa|fam[ií]lia|particular/i.test(carteira || '');
+const ehPF = (carteira, contaId) => contaId ? CF.ehPFCarteira(contaId, carteira) : /pessoal|\bpf\b|casa|fam[ií]lia|particular/i.test(carteira || '');
 const semAcento = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
 const hoje = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
 const brl = (v) => 'R$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,7 +34,9 @@ const mesDe = (d) => String(d).slice(0, 7);
 const somaDias = (d, n) => new Date(new Date(d + 'T12:00:00Z').getTime() + n * 864e5).toISOString().slice(0, 10);
 
 // ---------- carteiras ----------
-export function carteirasDe(contaId) { const c = db.prepare('SELECT carteiras FROM contas WHERE id=?').get(contaId)?.carteiras || ''; return c.split(/[,;\n]/).map(x => x.trim()).filter(Boolean); }
+/** Carteiras = as definidas na Tina + as empresas cadastradas (Conexões › Empresas), sem repetir. */
+export function carteirasDe(contaId) { return CF.listaCarteiras(contaId); }
+export function empresasDe(contaId) { try { return JSON.parse(db.prepare('SELECT empresas FROM contas WHERE id=?').get(contaId)?.empresas || '[]'); } catch { return []; } }
 export function resolverCarteira(contaId, nome, { obrigatoria = true } = {}) {
   const lista = carteirasDe(contaId);
   if (!lista.length) throw new Error('Ainda não há carteiras definidas. Pergunte ao dono quais são (ex.: "Mais Têxtil, Douglas Confecções, Pessoal") e use definir_carteiras.');
@@ -65,14 +67,14 @@ ${lote.map((x, k) => `${i + k}. ${x.valor < 0 ? 'SAÍDA' : 'ENTRADA'} ${Math.abs
     }
     return saida;
   }
-  const plano = ehPF(carteira) ? PLANO_PF : PLANO_PJ;
+  const plano = ehPF(carteira, contaId) ? PLANO_PF : PLANO_PJ;
   const { gerarJSON } = await import('../integracoes/gemini.js');
   const saida = [];
   for (let i = 0; i < itens.length; i += 120) {
     const lote = itens.slice(i, i + 120);
-    const j = await gerarJSON(`Classifique cada lançamento bancário da carteira "${carteira}" (${ehPF(carteira) ? 'pessoa física' : 'empresa'}) numa categoria do plano: ${plano.join(' | ')}. Inclua uma subcategoria curta (ex.: energia, folha, facção, combustível, mercado, tarifa bancária, pró-labore). Transferência entre contas próprias: categoria "Transferência". Responda JSON {"r":[{"i":número,"categoria":string,"subcategoria":string}]}.
+    const j = await gerarJSON(`Classifique cada lançamento bancário da carteira "${carteira}" (${ehPF(carteira, contaId) ? 'pessoa física' : 'empresa'}) numa categoria do plano: ${plano.join(' | ')}. Inclua uma subcategoria curta (ex.: energia, folha, facção, combustível, mercado, tarifa bancária, pró-labore). Transferência entre contas próprias: categoria "Transferência". Responda JSON {"r":[{"i":número,"categoria":string,"subcategoria":string}]}.
 ${lote.map((x, k) => `${i + k}. ${x.valor < 0 ? 'SAÍDA' : 'ENTRADA'} ${Math.abs(x.valor).toFixed(2)} — ${x.descricao}`).join('\n')}`);
-    for (const r of (j.r || [])) saida[r.i] = { categoria: [...plano, 'Transferência'].includes(r.categoria) ? r.categoria : (ehPF(carteira) ? 'Outros' : null), subcategoria: r.subcategoria || null };
+    for (const r of (j.r || [])) saida[r.i] = { categoria: [...plano, 'Transferência'].includes(r.categoria) ? r.categoria : (ehPF(carteira, contaId) ? 'Outros' : null), subcategoria: r.subcategoria || null };
   }
   return saida;
 }
@@ -143,7 +145,7 @@ export function gerarDRE(contaId, { mes, carteira } = {}) {
   const ant = mesDe(somaDias(m + '-15', -30));
   const monta = (mm) => {
     const t = totaisPorCategoria(contaId, cart, mm); const s = (cat, tipo) => t.filter(x => x.categoria === cat && (!tipo || x.tipo === tipo)).reduce((a, x) => a + x.total, 0);
-    if (cart && ehPF(cart)) { const ent = t.filter(x => x.tipo === 'entrada').reduce((a, x) => a + x.total, 0); const sai = t.filter(x => x.tipo === 'saida').reduce((a, x) => a + x.total, 0); return { tipo: 'PF', entradas: +ent.toFixed(2), saidas: +sai.toFixed(2), sobra: +(ent - sai).toFixed(2), por_categoria: Object.fromEntries(t.filter(x => x.tipo === 'saida').map(x => [x.categoria, +x.total.toFixed(2)])) }; }
+    if (cart && ehPF(cart, contaId)) { const ent = t.filter(x => x.tipo === 'entrada').reduce((a, x) => a + x.total, 0); const sai = t.filter(x => x.tipo === 'saida').reduce((a, x) => a + x.total, 0); return { tipo: 'PF', entradas: +ent.toFixed(2), saidas: +sai.toFixed(2), sobra: +(ent - sai).toFixed(2), por_categoria: Object.fromEntries(t.filter(x => x.tipo === 'saida').map(x => [x.categoria, +x.total.toFixed(2)])) }; }
     const receita = s('Receita operacional', 'entrada'), outras = s('Outras receitas', 'entrada'), cv = s('Custos variáveis', 'saida'), df = s('Despesas fixas', 'saida'), fin = s('Despesas financeiras', 'saida'), inv = s('Investimentos', 'saida'), ret = s('Retiradas', 'saida');
     const semCat = t.filter(x => x.categoria === 'Sem categoria').reduce((a, x) => a + (x.tipo === 'saida' ? -x.total : x.total), 0);
     const mc = receita - cv, ro = mc - df, res = ro - fin + outras;
@@ -154,7 +156,8 @@ export function gerarDRE(contaId, { mes, carteira } = {}) {
   return { mes: m, carteira: cart || 'consolidado (todas)', atual, mes_anterior: { mes: ant, ...anterior }, alertas, instrucao: 'Responda com os números principais, a comparação com o mês anterior e 3 leituras curtas.' };
 }
 export function saldoAtual(contaId, carteira) {
-  const s = db.prepare('SELECT saldo, data FROM fin_saldos WHERE conta_id=? AND carteira=? ORDER BY data DESC, id DESC LIMIT 1').get(contaId, carteira);
+  const pc = CF.saldoPelasContas(contaId, carteira); if (pc) return { saldo: pc.saldo, tem_saldo_inicial: true, base: pc.base };
+  const s = db.prepare('SELECT saldo, data FROM fin_saldos WHERE conta_id=? AND carteira=? AND conta_fin_id IS NULL ORDER BY data DESC, id DESC LIMIT 1').get(contaId, carteira);
   const desde = s?.data || '0000-00-00';
   const mov = db.prepare(`SELECT COALESCE(SUM(CASE WHEN tipo='entrada' THEN valor ELSE -valor END),0) v FROM fin_lancamentos WHERE conta_id=? AND carteira=? AND status='pago' AND oculto=0 AND ${efetiva} > ?`).get(contaId, carteira, desde).v;
   return { saldo: +((s?.saldo || 0) + mov).toFixed(2), tem_saldo_inicial: !!s, base: s ? `saldo informado ${brl(s.saldo)} em ${s.data}` : 'sem saldo inicial informado (soma só do que foi lançado)' };
@@ -200,6 +203,7 @@ export function ferramentas(_conta) {
     { name: 'recategorizar', description: 'Corrige a categoria de lançamentos (por ids ou por texto na descrição). criar_regra=true faz a correção valer para os próximos (a Tina aprende).', parameters: obj({ ids: { type: 'ARRAY', items: N }, texto: S, carteira: S, categoria: S, subcategoria: S, conta_plano: S, criar_regra: B }) },
     { name: 'importar_extrato_pendente', description: 'Importa um extrato que já foi lido e estava aguardando o dono dizer a carteira.', parameters: obj({ importacao_id: N, carteira: S }, ['importacao_id', 'carteira']) },
     { name: 'listar_contas_financeiras', description: 'Lista contas bancárias, cartões (crédito/débito) e dinheiro de cada carteira, com saldo (banco/dinheiro) e fatura aberta (cartão de crédito).', parameters: obj({ carteira: S }) },
+    { name: 'ficha_carteira', description: 'Define se a carteira é de uma empresa (pj) ou de uma pessoa (pf) e o titular (razão social ou nome completo). Use quando o dono disser de quem é a carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['pj', 'pf'] }, titular: S }, ['carteira', 'tipo']) },
     { name: 'cadastrar_conta_financeira', description: 'Cadastra uma conta bancária, cartão de crédito, cartão de débito ou dinheiro numa carteira. Cartão de crédito: informe dia_fechamento e dia_vencimento. O dono também cadastra no painel: Mais › Contas e cartões.', parameters: obj({ carteira: S, nome: S, tipo: { type: 'STRING', enum: ['banco', 'cartao_credito', 'cartao_debito', 'dinheiro', 'outro'] }, instituicao: S, final: S, limite: N, dia_fechamento: N, dia_vencimento: N }, ['carteira', 'nome', 'tipo']) },
     { name: 'pagar_fatura_cartao', description: 'Dá baixa na fatura de um cartão de crédito (todas as compras daquele vencimento), quando o dono disser que pagou. pago_com = conta bancária de onde saiu o dinheiro.', parameters: obj({ cartao: S, carteira: S, vencimento: S, pago_com: S, comprovante: S }, ['cartao']) },
     { name: 'listar_plano_contas', description: 'Mostra o plano de contas de uma carteira (código, nome, entrada/saída, grupo do DRE). Use para escolher conta_plano quando a carteira usa plano.', parameters: obj({ carteira: S }, ['carteira']) },
@@ -296,6 +300,7 @@ export async function executar(nome, a, conta) {
       if (!l.length) return { contas: [], dica: 'Nenhuma conta ou cartão cadastrado. Cadastre com cadastrar_conta_financeira ou no painel (Mais › Contas e cartões).' };
       return { contas: l.map(x => ({ carteira: x.carteira, conta: CF.rotuloConta(x), tipo: CF.TIPOS[x.tipo], ...(x.tipo === 'cartao_credito' ? { faturas_abertas: CF.faturasCartao(c, x.id), limite: x.limite, fecha_dia: x.dia_fechamento, vence_dia: x.dia_vencimento } : x.tipo === 'cartao_debito' ? {} : CF.saldoContaFin(c, x.id)) })) };
     }
+    case 'ficha_carteira': { const cart = resolverCarteira(c, a.carteira); CF.salvarFicha(c, cart, { tipo: a.tipo, titular: a.titular }); return { ok: true, carteira: cart, ...CF.fichaCarteira(c, cart) }; }
     case 'cadastrar_conta_financeira': {
       const cart = resolverCarteira(c, a.carteira); if (!CF.TIPOS[a.tipo]) throw new Error('tipo inválido');
       if (a.tipo === 'cartao_credito' && !a.dia_vencimento) throw new Error('para cartão de crédito, pergunte o dia de vencimento (e de fechamento) da fatura');

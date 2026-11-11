@@ -737,3 +737,15 @@ body[data-tela="conversa"] #app.com-trilho{grid-template-columns:256px minmax(0,
 .fin-cf-it b{font-variant-numeric:tabular-nums;white-space:nowrap}
 @media (max-width:640px){.cf-item{grid-template-columns:40px 1fr}.cf-acoes{grid-column:1/-1;justify-content:flex-start}}
 .cf-form[hidden],.cf-saldo-form[hidden],.cf-form label[hidden]{display:none!important}
+
+.fin-visao{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.fin-sel{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--tinta-mid)}
+.fin-sel select{min-height:42px;min-width:220px;max-width:100%;border-radius:999px;border:1px solid var(--linha);background:var(--branco);color:var(--tinta);font:700 14px var(--f-body);padding:0 14px}
+@media (max-width:640px){.fin-visao,.fin-sel{width:100%}.fin-sel select{min-width:0;width:100%}}
+
+.cf-chips{display:flex;flex-direction:column;gap:10px;margin-bottom:14px}
+.cf-chipg{display:flex;flex-direction:column;gap:6px}.cf-chipg>span{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--tinta-mid)}
+.cf-chipg .chips{margin:0!important}
+.cf-resumo{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:4px 0 6px}
+.cf-resumo>div{display:flex;flex-direction:column;gap:2px;padding:12px;border-radius:12px;background:var(--papel)}
+.cf-resumo span{font-size:12px;color:var(--tinta-mid)}.cf-resumo b{font-size:18px;font-variant-numeric:tabular-nums}.cf-resumo small{font-size:12px;color:var(--tinta-mid)}

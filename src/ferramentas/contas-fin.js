@@ -11,6 +11,41 @@ export function prepararContasFin() {
   try { db.exec('ALTER TABLE fin_lancamentos ADD COLUMN conta_fin_id INTEGER'); } catch {}
   try { db.exec('ALTER TABLE fin_saldos ADD COLUMN conta_fin_id INTEGER'); } catch {}
   try { db.exec('ALTER TABLE fin_lancamentos ADD COLUMN pago_com_id INTEGER'); } catch {} // fatura de cartão paga com qual conta
+  db.exec(`CREATE TABLE IF NOT EXISTS fin_carteiras (conta_id INTEGER NOT NULL, carteira TEXT NOT NULL, tipo TEXT, titular TEXT, documento TEXT, atualizado_em TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (conta_id, carteira))`);
+}
+
+/** Carteiras = as definidas na Tina + as empresas cadastradas (Conexões › Empresas), sem repetir. */
+export function listaCarteiras(contaId) {
+  const r = db.prepare('SELECT carteiras, empresas FROM contas WHERE id=?').get(contaId) || {};
+  let emp = []; try { emp = JSON.parse(r.empresas || '[]'); } catch {}
+  const out = []; for (const x of [...String(r.carteiras || '').split(/[,;\n]/), ...emp].map(x => String(x).trim()).filter(Boolean)) if (!out.some(o => semAcento(o) === semAcento(x))) out.push(x);
+  return out;
+}
+
+// ---------- Ficha da carteira: empresa (PJ) ou pessoa (PF), titular ----------
+const pfPeloNome = (c) => /pessoal|\bpf\b|casa|fam[ií]lia|particular/i.test(c || '');
+export function fichaCarteira(contaId, carteira) {
+  const f = db.prepare('SELECT * FROM fin_carteiras WHERE conta_id=? AND carteira=?').get(contaId, carteira);
+  let emp = []; try { emp = JSON.parse(db.prepare('SELECT empresas FROM contas WHERE id=?').get(contaId)?.empresas || '[]'); } catch {}
+  const tipo = f?.tipo || (emp.some(e => semAcento(e) === semAcento(carteira)) ? 'pj' : pfPeloNome(carteira) ? 'pf' : 'pj');
+  return { carteira, tipo, pf: tipo === 'pf', titular: f?.titular || '', documento: f?.documento || '', definido: !!f?.tipo };
+}
+export function ehPFCarteira(contaId, carteira) { try { return fichaCarteira(contaId, carteira).pf; } catch { return pfPeloNome(carteira); } }
+export function salvarFicha(contaId, carteira, { tipo, titular, documento } = {}) {
+  const t = tipo === 'pf' ? 'pf' : tipo === 'pj' ? 'pj' : null;
+  db.prepare(`INSERT INTO fin_carteiras (conta_id, carteira, tipo, titular, documento) VALUES (?,?,?,?,?) ON CONFLICT(conta_id, carteira) DO UPDATE SET tipo=COALESCE(excluded.tipo, tipo), titular=excluded.titular, documento=excluded.documento, atualizado_em=CURRENT_TIMESTAMP`)
+    .run(contaId, carteira, t, String(titular || '').trim().slice(0, 120) || null, String(documento || '').trim().slice(0, 30) || null);
+}
+
+/** Saldo da carteira pelas contas: soma das contas bancárias/dinheiro com saldo informado + movimentos sem conta depois disso. null se nenhuma conta tem saldo. */
+export function saldoPelasContas(contaId, carteira) {
+  const contas = listarContasFin(contaId, carteira).filter(c => c.tipo === 'banco' || c.tipo === 'dinheiro' || c.tipo === 'outro');
+  const comSaldo = contas.map(c => ({ c, s: saldoContaFin(contaId, c.id) })).filter(x => x.s.informado); if (!comSaldo.length) return null;
+  const desde = comSaldo.map(x => x.s.data_base).sort()[0];
+  const soltos = db.prepare(`SELECT COALESCE(SUM(CASE WHEN tipo='entrada' THEN valor ELSE -valor END),0) v FROM fin_lancamentos WHERE conta_id=? AND carteira=? AND conta_fin_id IS NULL AND pago_com_id IS NULL AND status='pago' AND oculto=0 AND COALESCE(pago_em,data) > ?`).get(contaId, carteira, desde).v;
+  const semSaldo = contas.filter(c => !comSaldo.some(x => x.c.id === c.id)).reduce((a, c) => a + saldoContaFin(contaId, c.id).saldo, 0);
+  const total = comSaldo.reduce((a, x) => a + x.s.saldo, 0) + semSaldo + soltos;
+  return { saldo: +total.toFixed(2), base: `soma de ${contas.length} conta${contas.length > 1 ? 's' : ''} (${comSaldo.map(x => rotuloConta(x.c)).join(', ')})` };
 }
 
 const semAcento = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
@@ -63,6 +98,10 @@ export function faturasCartao(contaId, cartaoId) {
 }
 
 export function resumoContasFin(contaId) {
-  try { const l = listarContasFin(contaId); if (!l.length) return ''; return l.map(c => `${c.carteira}: ${rotuloConta(c)} (${TIPOS[c.tipo]})`).join(' · '); } catch { return ''; }
+  try {
+    const fichas = db.prepare('SELECT * FROM fin_carteiras WHERE conta_id=?').all(contaId).map(f => `${f.carteira} = ${f.tipo === 'pf' ? 'PF' : 'PJ'}${f.titular ? ' (' + f.titular + ')' : ''}`);
+    const l = listarContasFin(contaId);
+    return [fichas.length ? ' · Fichas: ' + fichas.join(', ') : '', l.length ? ' · Contas/cartões: ' + l.map(c => `${c.carteira}: ${rotuloConta(c)} (${TIPOS[c.tipo]})`).join(' · ') : ''].join('');
+  } catch { return ''; }
 }
 try { prepararContasFin(); } catch {}
