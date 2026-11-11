@@ -37,6 +37,10 @@ export function rotasDados(app) {
     if (p.gcal_event_id) { try { const g = await import('../integracoes/google-calendar.js'); await g.cancelarEvento(req.contaId, p.gcal_event_id); } catch {} }
     db.prepare('DELETE FROM posts WHERE id=?').run(p.id); res.json({ ok: true });
   });
+  // Descarta de uma vez os rascunhos de post sem data (nunca toca em agendados nem publicados).
+  app.delete('/api/rascunhos-sem-data', auth, (req, res) => {
+    const r = db.prepare("DELETE FROM posts WHERE conta_id=? AND status='rascunho' AND data IS NULL").run(req.contaId); res.json({ ok: true, removidos: r.changes });
+  });
   app.get('/api/biblioteca', auth, async (req, res) => {
     const soc = await import('../ferramentas/social.js');
     const aj = await import('./api-marca.js'); const dias = Number(aj.ajuste(req.contaId, 'retencao_biblioteca_dias', process.env.BIBLIOTECA_RETENCAO_DIAS || 15));
@@ -119,9 +123,17 @@ export function rotasDados(app) {
         detalhe: atrasado ? `venceu em ${f.vencimento.split('-').reverse().join('/')}` : 'vence hoje', alerta: true,
         acoes: [...(f.documento && /^[\d .]{30,}$/.test(f.documento) ? [{ rotulo: 'Copiar código', copiar: f.documento.replace(/\D/g, '') }] : []), { rotulo: 'Já paguei', cmd: `Tina, já paguei: ${f.descricao || f.contraparte} (${brl(f.valor)}).`, sec: true }] });
     }
-    for (const p of q(`SELECT id, tema, status FROM posts WHERE conta_id=? AND (status='erro' OR (status='rascunho' AND data IS NULL)) ORDER BY id DESC LIMIT 4`, id))
-      precisa.push({ tipo: 'post', modulo: 'social', quem: quem('social'), titulo: p.status === 'erro' ? `Post não publicou: ${curto(p.tema || 'sem tema', 50)}` : `Rascunho de post: ${curto(p.tema || 'sem tema', 50)}`,
-        detalhe: p.status === 'erro' ? 'precisa tentar de novo' : 'escolha a data para publicar', alerta: p.status === 'erro', acoes: [{ rotulo: 'Abrir no calendário', tela: 'editorial' }, { rotulo: 'Descartar', excluir: `/api/editorial/${p.id}`, sec: true }] });
+    for (const p of q(`SELECT id, tema FROM posts WHERE conta_id=? AND status='erro' ORDER BY id DESC LIMIT 3`, id))
+      precisa.push({ tipo: 'post', modulo: 'social', quem: quem('social'), titulo: `Post não publicou: ${curto(p.tema || 'sem tema', 50)}`, detalhe: 'precisa tentar de novo', alerta: true,
+        acoes: [{ rotulo: 'Abrir no calendário', tela: 'editorial' }, { rotulo: 'Descartar', excluir: `/api/editorial/${p.id}`, sec: true }] });
+    // Rascunhos sem data: até 2 aparecem um a um; mais que isso viram UM cartão (não lotam a tela).
+    const rasc = q(`SELECT id, tema FROM posts WHERE conta_id=? AND status='rascunho' AND data IS NULL ORDER BY id DESC`, id);
+    if (rasc.length && rasc.length <= 2) for (const p of rasc)
+      precisa.push({ tipo: 'post', modulo: 'social', quem: quem('social'), titulo: `Rascunho de post: ${curto(p.tema || 'sem tema', 50)}`, detalhe: 'escolha a data ou descarte',
+        acoes: [{ rotulo: 'Abrir no calendário', tela: 'editorial' }, { rotulo: 'Descartar', excluir: `/api/editorial/${p.id}`, sec: true }] });
+    else if (rasc.length > 2)
+      precisa.push({ tipo: 'post', modulo: 'social', quem: quem('social'), titulo: `${rasc.length} rascunhos de post sem data`, detalhe: `o mais recente: ${curto(rasc[0].tema || 'sem tema', 40)}`,
+        acoes: [{ rotulo: 'Abrir no calendário', tela: 'editorial' }, { rotulo: 'Descartar todos', excluir: '/api/rascunhos-sem-data', sec: true }] });
     for (const t of q(`SELECT titulo, prazo FROM tarefas WHERE conta_id=? AND status='aberta' AND prazo IS NOT NULL AND prazo<=? ORDER BY prazo LIMIT 4`, id, hoje))
       precisa.push({ tipo: 'tarefa', modulo: 'secretaria', quem: quem('secretaria'), titulo: curto(t.titulo, 70), detalhe: t.prazo < hoje ? 'tarefa atrasada' : 'prazo hoje', alerta: t.prazo < hoje,
         acoes: [{ rotulo: 'Concluir', cmd: `Olga, marca como concluída a tarefa "${t.titulo}".` }] });

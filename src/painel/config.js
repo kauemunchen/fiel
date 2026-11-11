@@ -32,7 +32,7 @@ function ligarAcoes(raiz, itens) {
       if (!b.dataset.conf) { b.dataset.conf = '1'; b.textContent = 'Confirmar descarte'; b.classList.add('perigo'); setTimeout(() => { if (b.isConnected && b.dataset.conf) { delete b.dataset.conf; b.textContent = a.rotulo; b.classList.remove('perigo'); } }, 4000); return; }
       b.disabled = true; const r = await api(a.excluir, { method: 'DELETE' });
       if (r?.erro) { toast(r.erro); b.disabled = false; return; }
-      hojeCache = null; b.closest('.h-card, .t-item')?.remove(); toast('Rascunho descartado'); return; }
+      hojeCache = null; b.closest('.h-card, .t-item')?.remove(); toast(r?.removidos ? `${r.removidos} rascunhos descartados` : 'Rascunho descartado'); return; }
     if (a.tela) return mostrarTela(a.tela);
     if (a.cmd) { mostrarTela('conversa'); enviar(a.cmd); hojeCache = null; } });
 }
