@@ -215,7 +215,7 @@ export async function tratarMensagem(msg, canal) {
     db.prepare('DELETE FROM pendencias WHERE id=?').run(pend.id);
     const acoes = pend.ferramenta === '__lote__' ? JSON.parse(pend.args) : [{ name: pend.ferramenta, args: JSON.parse(pend.args) }];
     const { descreverAcao } = await import('./ia.js');
-    return `👍 Ok, não fiz nada — descartei: ${acoes.map(a => descreverAcao(a)).join('; ')}. Tudo continua como estava.`;
+    return `👍 Ok, não fiz nada — descartei: ${acoes.map(a => descreverAcao(a, conta.id)).join('; ')}. Tudo continua como estava.`;
   }
 
   // Mensagem nova que não é sim/não: a pendência perdeu o contexto. Descarta para um "sim" futuro

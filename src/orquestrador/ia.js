@@ -140,7 +140,7 @@ AGORA: ${agoraBR()} (America/Sao_Paulo). Datas relativas ("amanhã", "quinta") s
         const links = (email.args.texto.match(/https?:\/\/(?:drive|docs)\.google\.com\/[^\s)>\]]+/g) || []).length; const n = (email.args.anexos_drive_ids || []).length + links;
         return { texto: `✉️ Vou enviar este e-mail${email.args.respondendo_id ? ' (em resposta)' : ''}:\n\nPara: ${email.args.para || '(remetente do e-mail original)'}\nAssunto: ${email.args.assunto || '(Re: do original)'}\n\n${email.args.texto}${n ? `\n\n📎 ${n} arquivo(s) do Drive vão como ANEXO e com leitura liberada para o destinatário.` : ''}\n\nConfirma o envio?`, botoes: BOTOES_SIM_NAO };
       }
-      const linhas = calls.map(c => `- ${descreverAcao(c)}`);
+      const linhas = calls.map(c => `- ${descreverAcao(c, conta.id)}`);
       return { texto: `Vou fazer o seguinte:\n${linhas.join('\n')}\n\nConfirma?`, botoes: BOTOES_SIM_NAO };
     }
     for (const c of calls) {
@@ -173,7 +173,7 @@ AGORA: ${agoraBR()} (America/Sao_Paulo). Datas relativas ("amanhã", "quinta") s
 
 export const BOTOES_SIM_NAO = [[{ t: '✅ Sim', d: 'sim' }, { t: '❌ Não', d: 'não' }]];
 /** Descrição humana de uma chamada de ferramenta, para o pedido de confirmação. */
-export function descreverAcao(c) {
+export function descreverAcao(c, contaId) {
   const a = c.args || {};
   switch (c.name) {
     case 'ligar_assessor': return `ligar ${({ social: 'a MIA (conteúdo e redes sociais)', secretaria: 'a Olga (secretária)', documentos: 'o Estag (documentos)', financeiro: 'a Tina (financeiro)' })[a.modulo] || a.modulo} na sua conta${a.pedido_original ? ' e já fazer: ' + a.pedido_original : ''}`;
@@ -186,6 +186,10 @@ export function descreverAcao(c) {
     case 'delegar_tarefa': return `repassar para ${a.pessoa}: "${a.titulo}"${a.prazo ? ` até ${a.prazo.split('-').reverse().join('/')}` : ''}${a.detalhes ? ` — ${a.detalhes}` : ''}`;
     case 'enviar_email': return `enviar e-mail para ${a.para || '(remetente original)'} — "${a.assunto || 'Re:'}"`;
     case 'publicar': return `publicar o post #${a.post_id || ''} no Instagram`;
+    case 'excluir_lancamento': { // mostra O QUE vai ser apagado, não só o número
+      let l = null; try { l = db.prepare('SELECT tipo, valor, descricao, carteira, status, COALESCE(vencimento, pago_em, data) d FROM fin_lancamentos WHERE id=? AND conta_id=?').get(Number(a.id), contaId); } catch {}
+      if (!l) return `apagar o lançamento #${a.id} (não encontrado — nada será apagado)`;
+      return `APAGAR ${l.tipo === 'entrada' ? 'a entrada' : 'a saída'} "${l.descricao}" de R$ ${Number(l.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${l.carteira}, ${l.status === 'pago' ? 'paga' : 'em aberto'}, ${String(l.d || '').split('-').reverse().join('/')}) — não dá para desfazer`; }
     case 'criar_cobranca': return `criar cobrança de ${a.valor || ''} para ${a.cliente || ''}`;
     case 'encerrar_vigencia': return `encerrar a vigência #${a.vigencia_id}${a.nova_data ? ` e registrar nova até ${a.nova_data}` : ''}`;
     case 'remover_midia': return `remover a mídia #${a.id} da biblioteca (não volta)`;
