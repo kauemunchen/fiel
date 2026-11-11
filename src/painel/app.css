@@ -710,3 +710,30 @@ body[data-tela="conversa"] #app.com-trilho{grid-template-columns:256px minmax(0,
 .pc-lin.off .pc-nome,.pc-lin.off .pc-cod{opacity:.5;text-decoration:line-through}
 .pc-del{width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px}
 @media (max-width:860px){.pc-lin .pc-grupo,.pc-lin .pc-tipo{flex:1 1 40%;width:auto}}
+
+/* Contas e cartões */
+.cf-cart,.cf-nova,.cf-novacart{margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
+.cf-cart h3,.cf-nova h3,.cf-novacart h3{font-size:16px!important;margin:0!important}
+.cf-cart h3 small{font-weight:400;font-size:13px;color:var(--tinta-mid);margin-left:6px}
+.cf-cab{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center}
+.cf-cab-ac{display:flex;gap:8px}
+.cf-item{display:grid;grid-template-columns:40px 1fr auto;gap:10px 12px;align-items:center;padding:12px 0;border-top:1px solid var(--linha)}
+.cf-item.off .cf-txt{opacity:.55}
+.cf-ic{width:40px;height:40px;border-radius:12px;background:var(--papel-2,#F1EDE2);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.cf-txt small{color:var(--tinta-mid);font-size:13px}
+.cf-info{font-size:14px;color:var(--tinta-mid);margin-top:2px;line-height:1.45}.cf-info b{color:var(--tinta)}
+.cf-acoes{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.cf-acoes .icone{width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px}
+.cf-saldo-form,.cf-edit-form{grid-column:1/-1}
+.cf-form,.cf-saldo-form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.cf-form label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--tinta-mid);flex:1 1 150px;min-width:0}
+.cf-form label[hidden]{display:none}
+.cf-form input,.cf-form select,.cf-saldo-form input{min-height:42px;border-radius:10px;border:1px solid var(--linha);background:var(--papel);color:var(--tinta);font:400 15px var(--f-body);padding:0 10px;min-width:0}
+.cf-saldo-form input{flex:1 1 200px}
+.fin-cf{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.fin-cf-it{display:flex;gap:10px;align-items:center;padding:10px;border:1px solid var(--linha);border-radius:12px}
+.fin-cf-it .h-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.fin-cf-it small{color:var(--tinta-mid);font-size:12px}
+.fin-cf-it b{font-variant-numeric:tabular-nums;white-space:nowrap}
+@media (max-width:640px){.cf-item{grid-template-columns:40px 1fr}.cf-acoes{grid-column:1/-1;justify-content:flex-start}}
+.cf-form[hidden],.cf-saldo-form[hidden],.cf-form label[hidden]{display:none!important}

@@ -212,6 +212,7 @@ export function rotasDados(app) {
       mes_atual: atual, mes_anterior: { mes: mesAnt(mes), ...anterior },
       abertos: { a_receber_30: somaT(p30, 'entrada'), a_pagar_30: somaT(p30, 'saida'), atrasado_receber: somaT(atras, 'entrada'), atrasado_pagar: somaT(atras, 'saida'), n_atrasados: atras.length },
       previsao: { d30: proj(30), d60: proj(60), d90: proj(90), menor: minimo, serie },
+      contas_fin: await (async () => { const CF = await import('../ferramentas/contas-fin.js'); return CF.listarContasFin(id, cart).map(x => ({ id: x.id, carteira: x.carteira, rotulo: CF.rotuloConta(x), tipo: x.tipo, limite: x.limite, ...(x.tipo === 'cartao_credito' ? { faturas: CF.faturasCartao(id, x.id).slice(0, 2) } : x.tipo === 'cartao_debito' ? {} : { saldo: CF.saldoContaFin(id, x.id) }) })); })(),
       historico, categorias, ultimos,
       vencimentos: prev.filter(p => p.venc <= soma(hoje, 30)).slice(0, 12).map(p => ({ ...p, atrasado: p.venc < hoje, hoje: p.venc === hoje })) });
   });
@@ -262,5 +263,58 @@ export function rotasDados(app) {
     const usos = db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND carteira=? AND subcategoria=?').get(id, c.carteira, PL.rotulo(c)).n;
     if (usos) { db.prepare('UPDATE fin_plano SET ativo=0 WHERE id=?').run(c.id); return res.json({ ok: true, desativada: true, usos }); }
     db.prepare('DELETE FROM fin_plano WHERE id=?').run(c.id); res.json({ ok: true, removida: true });
+  });
+
+  // ---------- Carteiras e contas financeiras (bancos, cartões, dinheiro) ----------
+  const ehPFc = (c) => /pessoal|\bpf\b|casa|fam[ií]lia|particular/i.test(c || '');
+  app.get('/api/fin/contas', auth, async (req, res) => {
+    const CF = await import('../ferramentas/contas-fin.js'); const id = req.contaId; const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    const carteiras = (await carteirasConta(id)).map(c => ({ carteira: c, pf: ehPFc(c), lancamentos: db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND carteira=?').get(id, c).n,
+      contas: CF.listarContasFin(id, c, { todas: true }).map(x => ({ ...x, rotulo: CF.rotuloConta(x), tipo_nome: CF.TIPOS[x.tipo], usos: db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND (conta_fin_id=? OR pago_com_id=?)').get(id, x.id, x.id).n,
+        ...(x.tipo === 'cartao_credito' ? { faturas: CF.faturasCartao(id, x.id) } : x.tipo === 'cartao_debito' ? {} : { saldo: CF.saldoContaFin(id, x.id) }) })) }));
+    res.json({ hoje, carteiras, tipos: CF.TIPOS });
+  });
+  app.post('/api/fin/contas', auth, async (req, res) => {
+    const CF = await import('../ferramentas/contas-fin.js'); const id = req.contaId; const b = req.body || {};
+    const nome = String(b.nome || '').trim().slice(0, 60); if (!nome) return res.status(400).json({ erro: 'dê um nome (ex.: BB, Nubank, Dinheiro)' });
+    if (!CF.TIPOS[b.tipo]) return res.status(400).json({ erro: 'tipo inválido' });
+    const dia = (v) => { const n = Number(v); return n >= 1 && n <= 31 ? n : null; };
+    if (b.tipo === 'cartao_credito' && !dia(b.dia_vencimento)) return res.status(400).json({ erro: 'informe o dia de vencimento da fatura' });
+    const vals = [nome, b.tipo, String(b.instituicao || '').slice(0, 60) || null, String(b.final || '').replace(/\D/g, '').slice(-4) || null, Number(b.limite) || null, dia(b.dia_fechamento), dia(b.dia_vencimento), b.ativo === false ? 0 : 1];
+    if (b.id) { const r = db.prepare('UPDATE fin_contas SET nome=?, tipo=?, instituicao=?, final=?, limite=?, dia_fechamento=?, dia_vencimento=?, ativo=? WHERE id=? AND conta_id=?').run(...vals, Number(b.id), id); return r.changes ? res.json({ ok: true }) : res.status(404).json({ erro: 'não encontrada' }); }
+    if (!(await carteirasConta(id)).includes(b.carteira)) return res.status(400).json({ erro: 'carteira não encontrada' });
+    const r = db.prepare('INSERT INTO fin_contas (nome, tipo, instituicao, final, limite, dia_fechamento, dia_vencimento, ativo, conta_id, carteira) VALUES (?,?,?,?,?,?,?,?,?,?)').run(...vals, id, b.carteira);
+    res.json({ ok: true, id: Number(r.lastInsertRowid) });
+  });
+  app.delete('/api/fin/contas/:id', auth, (req, res) => {
+    const id = req.contaId; const x = db.prepare('SELECT * FROM fin_contas WHERE id=? AND conta_id=?').get(Number(req.params.id), id); if (!x) return res.status(404).json({ erro: 'não encontrada' });
+    const usos = db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND (conta_fin_id=? OR pago_com_id=?)').get(id, x.id, x.id).n;
+    if (usos) { db.prepare('UPDATE fin_contas SET ativo=0 WHERE id=?').run(x.id); return res.json({ ok: true, desativada: true, usos }); }
+    db.prepare('DELETE FROM fin_contas WHERE id=?').run(x.id); db.prepare('DELETE FROM fin_saldos WHERE conta_id=? AND conta_fin_id=?').run(id, x.id); res.json({ ok: true, removida: true });
+  });
+  app.post('/api/fin/saldo', auth, async (req, res) => {
+    const id = req.contaId; const b = req.body || {}; const x = db.prepare('SELECT * FROM fin_contas WHERE id=? AND conta_id=?').get(Number(b.conta_fin_id), id);
+    if (!x || /cartao/.test(x.tipo)) return res.status(400).json({ erro: 'saldo só para conta bancária ou dinheiro' });
+    const v = Number(String(b.saldo).replace(/\./g, '').replace(',', '.')); if (!isFinite(v)) return res.status(400).json({ erro: 'valor inválido' });
+    const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    db.prepare('INSERT INTO fin_saldos (conta_id, carteira, saldo, data, conta_fin_id) VALUES (?,?,?,?,?)').run(id, x.carteira, v, hoje, x.id); res.json({ ok: true });
+  });
+  app.post('/api/fin/carteiras', auth, async (req, res) => {
+    const id = req.contaId; const b = req.body || {};
+    const lista = await carteirasConta(id); const nome = String(b.nome || '').trim().slice(0, 50);
+    const gravar = (l) => db.prepare('UPDATE contas SET carteiras=? WHERE id=?').run(l.join(', '), id);
+    if (b.acao === 'adicionar') { if (!nome) return res.status(400).json({ erro: 'dê um nome (ex.: Mais Têxtil, Pessoal)' }); if (lista.some(c => c.toLowerCase() === nome.toLowerCase())) return res.status(400).json({ erro: 'essa carteira já existe' }); gravar([...lista, nome]); return res.json({ ok: true }); }
+    if (!lista.includes(b.carteira)) return res.status(400).json({ erro: 'carteira não encontrada' });
+    if (b.acao === 'renomear') {
+      if (!nome || lista.includes(nome)) return res.status(400).json({ erro: 'nome inválido ou já usado' });
+      db.transaction(() => { for (const t of ['fin_lancamentos', 'fin_saldos', 'fin_regras', 'fin_contas', 'fin_plano', 'fin_plano_cfg', 'fin_importacoes']) { try { db.prepare(`UPDATE ${t} SET carteira=? WHERE conta_id=? AND carteira=?`).run(nome, id, b.carteira); } catch {} } gravar(lista.map(c => c === b.carteira ? nome : c)); })();
+      return res.json({ ok: true });
+    }
+    if (b.acao === 'remover') {
+      const n = db.prepare('SELECT COUNT(*) n FROM fin_lancamentos WHERE conta_id=? AND carteira=?').get(id, b.carteira).n; if (n) return res.status(400).json({ erro: `a carteira tem ${n} lançamentos; não dá para remover` });
+      for (const t of ['fin_saldos', 'fin_regras', 'fin_contas', 'fin_plano', 'fin_plano_cfg']) { try { db.prepare(`DELETE FROM ${t} WHERE conta_id=? AND carteira=?`).run(id, b.carteira); } catch {} }
+      gravar(lista.filter(c => c !== b.carteira)); return res.json({ ok: true });
+    }
+    res.status(400).json({ erro: 'ação inválida' });
   });
 }

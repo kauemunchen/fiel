@@ -4,6 +4,7 @@
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
 import * as PL from './plano-contas.js';
+import * as CF from './contas-fin.js';
 
 export function prepararFinanceiro() {
   db.exec(`CREATE TABLE IF NOT EXISTS fin_lancamentos (
@@ -18,6 +19,7 @@ export function prepararFinanceiro() {
     CREATE TABLE IF NOT EXISTS fin_saldos (id INTEGER PRIMARY KEY, conta_id INTEGER NOT NULL, carteira TEXT NOT NULL, saldo REAL NOT NULL, data TEXT NOT NULL, criado_em TEXT DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS fin_importacoes (id INTEGER PRIMARY KEY, conta_id INTEGER NOT NULL, carteira TEXT, dados TEXT NOT NULL, resumo TEXT, status TEXT DEFAULT 'pendente', criado_em TEXT DEFAULT CURRENT_TIMESTAMP)`);
   try { db.exec('ALTER TABLE contas ADD COLUMN carteiras TEXT'); } catch {}
+  CF.prepararContasFin();
 }
 prepararFinanceiro();
 
@@ -186,17 +188,20 @@ export const requerConfirmacao = new Set(['excluir_lancamento', 'criar_cobranca'
 export function ferramentas(_conta) {
   return [
     { name: 'definir_carteiras', description: 'Define a lista de carteiras do dono (cada empresa e a vida pessoal separadas). Substitui a lista inteira — inclua as existentes.', parameters: obj({ carteiras: { type: 'ARRAY', items: S } }, ['carteiras']) },
-    { name: 'definir_saldo', description: 'Registra o saldo atual (ou numa data) de uma carteira — base para o fluxo de caixa.', parameters: obj({ carteira: S, saldo: N, data: { type: 'STRING', description: 'YYYY-MM-DD; padrão hoje' } }, ['carteira', 'saldo']) },
-    { name: 'registrar_lancamento', description: 'Registra uma entrada ou saída JÁ ACONTECIDA (ex.: "paguei 350 de luz ontem"). Exige carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['entrada', 'saida'] }, valor: N, descricao: S, categoria: S, subcategoria: S, data: S, contraparte: S, conta_plano: S, forcar_novo: B }, ['tipo', 'valor', 'descricao']) },
-    { name: 'criar_conta_pagar', description: 'Agenda uma conta a pagar (boleto, fornecedor, imposto). recorrente=true para conta fixa mensal.', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, subcategoria: S, conta_plano: S, linha_digitavel: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
-    { name: 'criar_conta_receber', description: 'Agenda um valor a receber (cliente, venda a prazo).', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, conta_plano: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
-    { name: 'dar_baixa', description: 'Marca uma conta prevista como paga/recebida. SÓ quando o dono disser explicitamente que pagou/recebeu ("paguei", "recebi", "já paguei") ou mandar comprovante/extrato. Agradecimento, "ok" ou "o link ajudou" NÃO é pagamento. comprovante: descrição do comprovante, ou "declarado pelo dono" quando ele afirmou que pagou.', parameters: obj({ id: N, data: S, comprovante: S, extrato_id: N, valor_pago: N }, ['id']) },
+    { name: 'definir_saldo', description: 'Registra o saldo atual (ou numa data) de uma carteira — base para o fluxo de caixa.', parameters: obj({ carteira: S, saldo: N, data: { type: 'STRING', description: 'YYYY-MM-DD; padrão hoje' }, conta: { type: 'STRING', description: 'conta bancária ou dinheiro (quando a carteira tem várias contas)' } }, ['carteira', 'saldo']) },
+    { name: 'registrar_lancamento', description: 'Registra uma entrada ou saída JÁ ACONTECIDA (ex.: "paguei 350 de luz ontem"). Exige carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['entrada', 'saida'] }, valor: N, descricao: S, categoria: S, subcategoria: S, data: S, contraparte: S, conta_plano: S, conta: S, forcar_novo: B }, ['tipo', 'valor', 'descricao']) },
+    { name: 'criar_conta_pagar', description: 'Agenda uma conta a pagar (boleto, fornecedor, imposto). recorrente=true para conta fixa mensal.', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, subcategoria: S, conta_plano: S, conta: S, linha_digitavel: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
+    { name: 'criar_conta_receber', description: 'Agenda um valor a receber (cliente, venda a prazo).', parameters: obj({ carteira: S, valor: N, descricao: S, vencimento: S, contraparte: S, categoria: S, conta_plano: S, conta: S, recorrente: B }, ['valor', 'descricao', 'vencimento']) },
+    { name: 'dar_baixa', description: 'Marca uma conta prevista como paga/recebida. SÓ quando o dono disser explicitamente que pagou/recebeu ("paguei", "recebi", "já paguei") ou mandar comprovante/extrato. Agradecimento, "ok" ou "o link ajudou" NÃO é pagamento. comprovante: descrição do comprovante, ou "declarado pelo dono" quando ele afirmou que pagou.', parameters: obj({ id: N, data: S, comprovante: S, extrato_id: N, valor_pago: N, conta: { type: 'STRING', description: 'conta/cartão de onde saiu ou entrou o dinheiro (opcional)' } }, ['id']) },
     { name: 'listar_lancamentos', description: 'Lista lançamentos com filtros (período, carteira, categoria, tipo, status, texto).', parameters: obj({ carteira: S, de: S, ate: S, categoria: S, tipo: S, status: { type: 'STRING', enum: ['pago', 'previsto'] }, texto: S, limite: N }) },
     { name: 'contas_em_aberto', description: 'Contas a pagar/receber atrasadas, vencendo hoje e nos próximos dias.', parameters: obj({ dias: N, carteira: S }) },
     { name: 'gerar_dre', description: 'DRE gerencial do mês (padrão: mês anterior) por carteira ou consolidado, com comparação ao mês anterior e alertas.', parameters: obj({ mes: { type: 'STRING', description: 'YYYY-MM' }, carteira: S }) },
     { name: 'fluxo_caixa', description: 'Saldo de hoje, a pagar/receber e saldo projetado nos próximos dias por carteira, com alerta de saldo negativo.', parameters: obj({ dias: N, carteira: S }) },
     { name: 'recategorizar', description: 'Corrige a categoria de lançamentos (por ids ou por texto na descrição). criar_regra=true faz a correção valer para os próximos (a Tina aprende).', parameters: obj({ ids: { type: 'ARRAY', items: N }, texto: S, carteira: S, categoria: S, subcategoria: S, conta_plano: S, criar_regra: B }) },
     { name: 'importar_extrato_pendente', description: 'Importa um extrato que já foi lido e estava aguardando o dono dizer a carteira.', parameters: obj({ importacao_id: N, carteira: S }, ['importacao_id', 'carteira']) },
+    { name: 'listar_contas_financeiras', description: 'Lista contas bancárias, cartões (crédito/débito) e dinheiro de cada carteira, com saldo (banco/dinheiro) e fatura aberta (cartão de crédito).', parameters: obj({ carteira: S }) },
+    { name: 'cadastrar_conta_financeira', description: 'Cadastra uma conta bancária, cartão de crédito, cartão de débito ou dinheiro numa carteira. Cartão de crédito: informe dia_fechamento e dia_vencimento. O dono também cadastra no painel: Mais › Contas e cartões.', parameters: obj({ carteira: S, nome: S, tipo: { type: 'STRING', enum: ['banco', 'cartao_credito', 'cartao_debito', 'dinheiro', 'outro'] }, instituicao: S, final: S, limite: N, dia_fechamento: N, dia_vencimento: N }, ['carteira', 'nome', 'tipo']) },
+    { name: 'pagar_fatura_cartao', description: 'Dá baixa na fatura de um cartão de crédito (todas as compras daquele vencimento), quando o dono disser que pagou. pago_com = conta bancária de onde saiu o dinheiro.', parameters: obj({ cartao: S, carteira: S, vencimento: S, pago_com: S, comprovante: S }, ['cartao']) },
     { name: 'listar_plano_contas', description: 'Mostra o plano de contas de uma carteira (código, nome, entrada/saída, grupo do DRE). Use para escolher conta_plano quando a carteira usa plano.', parameters: obj({ carteira: S }, ['carteira']) },
     { name: 'ativar_plano_contas', description: 'Liga o plano de contas numa carteira a partir de um modelo (empresa, industria, pessoal). Ajustes finos o dono faz no painel: Mais › Plano de contas.', parameters: obj({ carteira: S, modelo: { type: 'STRING', enum: ['empresa', 'industria', 'pessoal'] } }, ['carteira', 'modelo']) },
     { name: 'reabrir_lancamento', description: 'Desfaz uma baixa: a conta volta a ficar em aberto (prevista). Use quando o dono disser que NÃO pagou/recebeu algo que foi baixado. Nunca exclua a conta para isso.', parameters: obj({ id: N }, ['id']) },
@@ -213,7 +218,10 @@ export async function executar(nome, a, conta) {
       const lista = [...new Set((a.carteiras || []).map(x => String(x).trim()).filter(Boolean))]; if (!lista.length) throw new Error('informe ao menos uma carteira');
       db.prepare('UPDATE contas SET carteiras=? WHERE id=?').run(lista.join(', '), c); return { ok: true, carteiras: lista };
     }
-    case 'definir_saldo': { const cart = resolverCarteira(c, a.carteira); db.prepare('INSERT INTO fin_saldos (conta_id, carteira, saldo, data) VALUES (?,?,?,?)').run(c, cart, Number(a.saldo), a.data || hoje()); return { ok: true, carteira: cart, saldo: Number(a.saldo), data: a.data || hoje() }; }
+    case 'definir_saldo': { const cart = resolverCarteira(c, a.carteira); const cfS = CF.resolverContaFin(c, cart, a.conta);
+      if (cfS && cfS.tipo === 'cartao_credito') throw new Error('cartão de crédito não tem saldo; informe o saldo da conta bancária ou do dinheiro');
+      db.prepare('INSERT INTO fin_saldos (conta_id, carteira, saldo, data, conta_fin_id) VALUES (?,?,?,?,?)').run(c, cart, Number(a.saldo), a.data || hoje(), cfS?.id || null);
+      return { ok: true, carteira: cart, conta: cfS ? CF.rotuloConta(cfS) : 'carteira inteira', saldo: Number(a.saldo), data: a.data || hoje() }; }
     case 'registrar_lancamento': {
       const cart = resolverCarteira(c, a.carteira); const v = Math.abs(Number(a.valor)); if (!v) throw new Error('valor inválido');
       // Já existe conta prevista igual? Então é baixa, não lançamento novo (evita duplicar e "sumir" a conta).
@@ -223,7 +231,10 @@ export async function executar(nome, a, conta) {
       if (a.data && a.data > hoje()) a.data = hoje(); // já aconteceu: nunca data futura
       const encR = PL.encaixarNoPlano(c, cart, a.tipo === 'entrada' ? 'entrada' : 'saida', { ...a, categoria: a.categoria || regra?.categoria, subcategoria: a.subcategoria || regra?.subcategoria }); a = encR.a;
       const id = Number(db.prepare("INSERT INTO fin_lancamentos (conta_id, carteira, tipo, valor, descricao, categoria, subcategoria, contraparte, status, data, pago_em, origem) VALUES (?,?,?,?,?,?,?,?,'pago',?,?,'manual')").run(c, cart, a.tipo === 'entrada' ? 'entrada' : 'saida', v, a.descricao, a.categoria || regra?.categoria || null, a.subcategoria || regra?.subcategoria || null, a.contraparte || null, a.data || hoje(), a.data || hoje()).lastInsertRowid);
-      return { ok: true, id, carteira: cart, valor: v, categoria: a.categoria || regra?.categoria || 'sem categoria — pergunte ou use recategorizar', conta_plano: encR.conta_plano, aviso: encR.aviso };
+      const cfR = CF.resolverContaFin(c, cart, a.conta); let fatura = null;
+      if (cfR) { db.prepare('UPDATE fin_lancamentos SET conta_fin_id=? WHERE id=?').run(cfR.id, id);
+        if (cfR.tipo === 'cartao_credito') { fatura = CF.vencimentoFatura(cfR, a.data || hoje()); db.prepare("UPDATE fin_lancamentos SET status='previsto', vencimento=?, pago_em=NULL WHERE id=?").run(fatura, id); } }
+      return { ok: true, id, carteira: cart, valor: v, categoria: a.categoria || regra?.categoria || 'sem categoria — pergunte ou use recategorizar', conta_plano: encR.conta_plano, aviso: encR.aviso, conta: cfR ? CF.rotuloConta(cfR) : undefined, fatura_cartao: fatura ? `entra na fatura que vence em ${fatura.split('-').reverse().join('/')}` : undefined };
     }
     case 'criar_conta_pagar': case 'criar_conta_receber': {
       const cart = resolverCarteira(c, a.carteira); const v = Math.abs(Number(a.valor)); if (!v) throw new Error('valor inválido'); if (!/^\d{4}-\d{2}-\d{2}$/.test(a.vencimento || '')) throw new Error('vencimento no formato YYYY-MM-DD');
@@ -232,7 +243,8 @@ export async function executar(nome, a, conta) {
       const doc = a.linha_digitavel ? String(a.linha_digitavel).replace(/\s/g, '') : null;
       if (doc && db.prepare('SELECT 1 FROM fin_lancamentos WHERE conta_id=? AND documento=? AND oculto=0').get(c, doc)) throw new Error('Esse boleto (mesma linha digitável) já está lançado.');
       const id = Number(db.prepare("INSERT INTO fin_lancamentos (conta_id, carteira, tipo, valor, descricao, categoria, subcategoria, contraparte, status, data, vencimento, origem, documento, recorrente) VALUES (?,?,?,?,?,?,?,?,'previsto',?,?,?,?,?)").run(c, cart, tipo, v, a.descricao, a.categoria || regra?.categoria || null, a.subcategoria || regra?.subcategoria || null, a.contraparte || null, a.vencimento, a.vencimento, doc ? 'boleto' : 'manual', doc, a.recorrente ? 1 : 0).lastInsertRowid);
-      return { ok: true, id, carteira: cart, tipo, valor: v, vencimento: a.vencimento, recorrente: !!a.recorrente, conta_plano: encC.conta_plano, aviso: encC.aviso };
+      const cfC = CF.resolverContaFin(c, cart, a.conta); if (cfC) db.prepare('UPDATE fin_lancamentos SET conta_fin_id=? WHERE id=?').run(cfC.id, id);
+      return { ok: true, id, carteira: cart, tipo, valor: v, vencimento: a.vencimento, recorrente: !!a.recorrente, conta_plano: encC.conta_plano, aviso: encC.aviso, conta: cfC ? CF.rotuloConta(cfC) : undefined };
     }
     case 'dar_baixa': {
       if (!a.comprovante && !a.extrato_id) throw new Error('Baixa sem comprovante nem extrato. Peça o comprovante (foto/print do pix) ou o extrato.');
@@ -241,6 +253,8 @@ export async function executar(nome, a, conta) {
       const data = a.data && a.data <= hoje() ? a.data : hoje(); const valor = a.valor_pago ? Math.abs(Number(a.valor_pago)) : p.valor; // pagamento nunca com data futura
       db.prepare("UPDATE fin_lancamentos SET status='pago', pago_em=?, valor=?, comprovante=?, conciliado_id=? WHERE id=?").run(data, valor, a.comprovante || `extrato #${a.extrato_id}`, a.extrato_id || null, p.id);
       if (a.extrato_id) db.prepare('UPDATE fin_lancamentos SET oculto=1 WHERE id=? AND conta_id=?').run(Number(a.extrato_id), c);
+      const cfB = CF.resolverContaFin(c, p.carteira, a.conta); if (cfB?.tipo === 'cartao_credito') { const fv = CF.vencimentoFatura(cfB, data); db.prepare("UPDATE fin_lancamentos SET conta_fin_id=?, status='previsto', pago_em=NULL, vencimento=? WHERE id=?").run(cfB.id, fv, p.id); return { ok: true, id: p.id, no_cartao: CF.rotuloConta(cfB), entra_na_fatura: fv }; }
+      if (cfB) db.prepare('UPDATE fin_lancamentos SET pago_com_id=? WHERE id=?').run(cfB.id, p.id);
       const proxima = criarProximaRecorrencia(p);
       return { ok: true, id: p.id, pago_em: data, valor, proxima_recorrencia: proxima ? { id: proxima } : null };
     }
@@ -276,6 +290,28 @@ export async function executar(nome, a, conta) {
       const imp = db.prepare("SELECT * FROM fin_importacoes WHERE id=? AND conta_id=? AND status='pendente'").get(Number(a.importacao_id), c); if (!imp) throw new Error('importação não encontrada ou já feita');
       const cart = resolverCarteira(c, a.carteira); const r = await importarLancamentos(c, cart, JSON.parse(imp.dados), { importacaoId: imp.id });
       db.prepare("UPDATE fin_importacoes SET status='importada', carteira=? WHERE id=?").run(cart, imp.id); return r;
+    }
+    case 'listar_contas_financeiras': {
+      const cart = a.carteira ? resolverCarteira(c, a.carteira) : null; const l = CF.listarContasFin(c, cart);
+      if (!l.length) return { contas: [], dica: 'Nenhuma conta ou cartão cadastrado. Cadastre com cadastrar_conta_financeira ou no painel (Mais › Contas e cartões).' };
+      return { contas: l.map(x => ({ carteira: x.carteira, conta: CF.rotuloConta(x), tipo: CF.TIPOS[x.tipo], ...(x.tipo === 'cartao_credito' ? { faturas_abertas: CF.faturasCartao(c, x.id), limite: x.limite, fecha_dia: x.dia_fechamento, vence_dia: x.dia_vencimento } : x.tipo === 'cartao_debito' ? {} : CF.saldoContaFin(c, x.id)) })) };
+    }
+    case 'cadastrar_conta_financeira': {
+      const cart = resolverCarteira(c, a.carteira); if (!CF.TIPOS[a.tipo]) throw new Error('tipo inválido');
+      if (a.tipo === 'cartao_credito' && !a.dia_vencimento) throw new Error('para cartão de crédito, pergunte o dia de vencimento (e de fechamento) da fatura');
+      const final = a.final ? String(a.final).replace(/\D/g, '').slice(-4) : null;
+      const r = db.prepare('INSERT INTO fin_contas (conta_id, carteira, nome, tipo, instituicao, final, limite, dia_fechamento, dia_vencimento) VALUES (?,?,?,?,?,?,?,?,?)').run(c, cart, String(a.nome).slice(0, 60), a.tipo, a.instituicao || null, final, a.limite || null, a.dia_fechamento || null, a.dia_vencimento || null);
+      return { ok: true, id: Number(r.lastInsertRowid), carteira: cart, conta: `${a.nome}${final ? ' ••' + final : ''}`, tipo: CF.TIPOS[a.tipo] };
+    }
+    case 'pagar_fatura_cartao': {
+      const cartP = a.carteira ? resolverCarteira(c, a.carteira) : null;
+      const cartao = CF.listarContasFin(c, cartP).filter(x => x.tipo === 'cartao_credito').find(x => x.id === (CF.acharContaFin(c, x.carteira, a.cartao) || {}).id);
+      if (!cartao) throw new Error(`cartão "${a.cartao}" não encontrado. Cartões: ${CF.listarContasFin(c, cartP).filter(x => x.tipo === 'cartao_credito').map(CF.rotuloConta).join(' · ') || 'nenhum cadastrado'}`);
+      const faturas = CF.faturasCartao(c, cartao.id); if (!faturas.length) return { ok: true, sem_fatura_aberta: true };
+      const venc = a.vencimento || faturas[0].venc; const f = faturas.find(x => x.venc === venc); if (!f) throw new Error(`não há fatura aberta com vencimento ${venc}. Abertas: ${faturas.map(x => `${x.venc} (R$ ${x.total})`).join(', ')}`);
+      const pagoCom = a.pago_com ? CF.resolverContaFin(c, cartao.carteira, a.pago_com) : null;
+      const n = db.prepare("UPDATE fin_lancamentos SET status='pago', pago_em=?, comprovante=?, pago_com_id=? WHERE conta_id=? AND conta_fin_id=? AND status IN ('previsto','pendente') AND oculto=0 AND COALESCE(vencimento,data)=?").run(hoje(), a.comprovante || 'declarado pelo dono', pagoCom?.id || null, c, cartao.id, venc).changes;
+      return { ok: true, cartao: CF.rotuloConta(cartao), vencimento: venc, total: f.total, compras: n, pago_com: pagoCom ? CF.rotuloConta(pagoCom) : null };
     }
     case 'listar_plano_contas': {
       const cart = resolverCarteira(c, a.carteira); const cfg = PL.cfgPlano(c, cart);

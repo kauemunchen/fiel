@@ -508,7 +508,7 @@ telas.financeiro = async () => {
   const d = await api('/api/financeiro/painel?' + q); const nomeTina = me?.personas?.find(p => p.modulo === 'financeiro')?.nome || 'Tina';
   const meses = []; { let m = d.hoje.slice(0, 7); for (let k = 0; k < 12; k++) { meses.push(m); const [a, b] = m.split('-').map(Number); m = b === 1 ? `${a - 1}-12` : `${a}-${String(b - 1).padStart(2, '0')}`; } }
   const filtros = `<div class="fin-filtros"><div class="chips fin-chips" role="group" aria-label="Carteira">${['', ...d.carteiras].map(c => `<button type="button" data-cart="${esc(c)}" class="${(d.carteira || '') === c ? 'on' : ''}">${c ? esc(c) : 'Todas as carteiras'}</button>`).join('')}</div>
-    <div class="fin-dir"><button type="button" class="chip-link" id="finPlano">Plano de contas</button><label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div></div>`;
+    <div class="fin-dir"><button type="button" class="chip-link" id="finContas">Contas e cartões</button><button type="button" class="chip-link" id="finPlano">Plano de contas</button><label class="fin-mes"><span class="so-leitor">Mês</span><select id="finMes">${meses.map(m => `<option value="${m}" ${m === d.mes ? 'selected' : ''}>${mesLongo(m)}</option>`).join('')}</select></label></div></div>`;
   if (d.vazio) return { titulo: 'Financeiro', sub: `Painel gerencial da ${esc(nomeTina)}`, corpo: `<div class="cartao fin-vazio"><h3>Seu financeiro aparece aqui</h3><p class="d">Mande o extrato do banco (OFX ou CSV), uma foto de boleto ou nota, ou conte à ${esc(nomeTina)} o saldo atual. Ela organiza tudo e este painel se monta sozinho.</p><div class="h-acoes"><button class="btn-h pri" data-cmd="${esc(nomeTina)}, quero mandar o extrato do banco">Mandar extrato</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero informar o saldo atual da conta">Informar saldo</button></div></div>`,
     depois: () => document.querySelectorAll('.fin-vazio [data-cmd]').forEach(b => b.onclick = () => { mostrarTela('conversa'); enviar(b.dataset.cmd); }) };
   const a = d.mes_atual, p = d.mes_anterior, delta = a.resultado - p.resultado;
@@ -530,6 +530,8 @@ telas.financeiro = async () => {
   const corpo = filtros + kpis + `<div class="fin-grade">
     <section class="cartao fin-box"><h3>Previsão de saldo · 90 dias</h3><p class="d">Saldo de hoje somado às contas a receber e a pagar já lançadas.</p>${graficoPrevisao(d.previsao.serie)}${tabela(['Quando', 'Saldo previsto'], [['Hoje', brlF(d.previsao.serie[0].v)], ['Em 30 dias', brlF(d.previsao.d30)], ['Em 60 dias', brlF(d.previsao.d60)], ['Em 90 dias', brlF(d.previsao.d90)], ['Menor saldo', `${brlF(d.previsao.menor.valor)} (${dataBR(d.previsao.menor.dia)})`]])}</section>
     <section class="cartao fin-box"><h3>Recebido x pago · 6 meses</h3><div class="fin-leg"><span><i class="ent"></i>Recebido</span><span><i class="sai"></i>Pago</span></div>${graficoMeses(d.historico)}${tabela(['Mês', 'Recebido', 'Pago', 'Resultado'], d.historico.map(h => [mesNome(h.mes), brlF(h.recebido), brlF(h.pago), brlF(h.resultado, true)]))}</section>
+    ${(d.contas_fin || []).length ? `<section class="cartao fin-box largo"><h3>Contas e cartões</h3><div class="fin-cf">${d.contas_fin.map(x => { const uso = x.tipo === 'cartao_credito' && x.limite ? Math.min(100, (x.faturas || []).reduce((s, f) => s + f.total, 0) / x.limite * 100) : null;
+      return `<div class="fin-cf-it"><span class="cf-ic" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24">${icTipo[x.tipo] || icTipo.outro}</svg></span><div class="h-txt"><span>${esc(x.rotulo)}</span><small>${d.carteira ? '' : esc(x.carteira) + ' · '}${x.tipo === 'cartao_credito' ? (x.faturas?.length ? `fatura ${dataBR(x.faturas[0].venc)}` : 'sem fatura aberta') : x.tipo === 'cartao_debito' ? 'débito' : 'saldo'}</small>${uso !== null ? `<div class="fin-cat-b" title="${uso.toFixed(0)}% do limite"><i style="width:${uso.toFixed(1)}%"></i></div>` : ''}</div><b>${x.tipo === 'cartao_credito' ? brlF(x.faturas?.[0]?.total || 0) : x.tipo === 'cartao_debito' ? '' : brlF(x.saldo?.saldo || 0)}</b></div>`; }).join('')}</div></section>` : ''}
     <section class="cartao fin-box"><h3>A vencer · 30 dias${d.abertos.n_atrasados ? ` <span class="tag off">${d.abertos.n_atrasados} em atraso</span>` : ''}</h3>${venc}</section>
     <section class="cartao fin-box"><h3>Despesas de ${mesNome(d.mes)} por ${d.usa_plano ? 'conta do plano' : 'categoria'}</h3>${cats}</section>
     <section class="cartao fin-box largo"><h3>Últimos lançamentos</h3>${ult}<div class="h-acoes" style="margin-top:12px"><button class="btn-h sec" data-cmd="${esc(nomeTina)}, me manda o DRE de ${mesLongo(d.mes)}">Pedir DRE do mês</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero lançar uma conta">Lançar conta</button><button class="btn-h sec" data-cmd="${esc(nomeTina)}, quero mandar o extrato do banco">Mandar extrato</button></div></section>
@@ -537,6 +539,7 @@ telas.financeiro = async () => {
   return { titulo: 'Financeiro', sub: `Painel gerencial da ${esc(nomeTina)} · ${mesLongo(d.mes)}`, corpo, depois: () => {
     const raiz = $('#tela-config'); raiz.classList.add('tela-fin'); ligarGraficos(raiz);
     raiz.querySelectorAll('[data-cart]').forEach(b => b.onclick = () => { finEstado.carteira = b.dataset.cart; mostrarTela('financeiro'); });
+    $('#finContas').onclick = () => { cfEstado.carteira = finEstado.carteira || ''; mostrarTela('contasfin'); };
     $('#finPlano').onclick = () => { planoEstado.carteira = finEstado.carteira || ''; mostrarTela('plano'); };
     $('#finMes').onchange = (e) => { finEstado.mes = e.target.value; mostrarTela('financeiro'); };
     raiz.querySelectorAll('.fin-bx').forEach(b => b.onclick = () => { const v = d.vencimentos[b.dataset.i]; mostrarTela('conversa'); enviar(`${nomeTina}, ${v.tipo === 'entrada' ? 'recebi' : 'paguei'}: ${v.descricao || v.contraparte} (${brlF(v.valor)}, ${v.carteira}).`); });
@@ -597,3 +600,74 @@ telas.plano = async () => {
     $('#pnAdd') && ($('#pnAdd').onclick = async () => { const r = await pp('/api/plano/conta', { carteira: sel.carteira, codigo: $('#pnCod').value, nome: $('#pnNome').value, tipo: $('#pnTipo').value, grupo: $('#pnGrupo').value }); if (!r?.erro) { toast('Conta criada'); mostrarTela('plano'); } });
   } };
 };
+
+// ---------------- CONTAS E CARTÕES (bancos, cartões, dinheiro — por carteira) ----------------
+const cfEstado = { carteira: '' };
+const icTipo = { banco: '<path d="M3 10l9-6 9 6M5 10v8M19 10v8M9 10v8M15 10v8M3 20h18"/>', cartao_credito: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h4"/>', cartao_debito: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/>', dinheiro: '<rect x="3" y="7" width="18" height="10" rx="2"/><circle cx="12" cy="12" r="2.5"/>', outro: '<circle cx="12" cy="12" r="8"/>' };
+telas.contasfin = async () => {
+  const d = await api('/api/fin/contas'); const brl = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const dt = (s) => s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '';
+  const sub = 'Cadastre as contas bancárias (PF e PJ), cartões de crédito e débito e o dinheiro de cada carteira. A Tina usa as ativas para lançar, dar baixa e pagar faturas.';
+  const novaCarteira = `<section class="cartao cf-novacart"><h3>Nova carteira</h3><p class="d">Carteira é de quem é o dinheiro: uma empresa (PJ) ou a vida pessoal (PF).</p><div class="cf-form"><label class="so-leitor" for="ncNome">Nome</label><input id="ncNome" placeholder="ex.: Mais Têxtil, Pessoal"><button type="button" class="btn-h pri" id="ncAdd">Criar carteira</button></div></section>`;
+  if (!d.carteiras?.length) return { titulo: 'Contas e cartões', sub, corpo: novaCarteira, depois: ligarNovaCarteira };
+  const sel = d.carteiras.find(c => c.carteira === cfEstado.carteira) || d.carteiras[0]; cfEstado.carteira = sel.carteira;
+  const chips = `<div class="chips fin-chips" role="group" aria-label="Carteira">${d.carteiras.map(c => `<button type="button" data-cfc="${esc(c.carteira)}" class="${c.carteira === sel.carteira ? 'on' : ''}">${esc(c.carteira)} <small>${c.pf ? 'PF' : 'PJ'}</small></button>`).join('')}</div>`;
+  const info = (x) => x.tipo === 'cartao_credito'
+    ? `${x.limite ? `Limite ${brl(x.limite)} · ` : ''}fecha dia ${x.dia_fechamento || '—'}, vence dia ${x.dia_vencimento || '—'}${x.faturas?.length ? `<br><b>Fatura ${dt(x.faturas[0].venc)}: ${brl(x.faturas[0].total)}</b>${x.faturas.length > 1 ? ` · depois ${brl(x.faturas.slice(1).reduce((s, f) => s + f.total, 0))}` : ''}` : '<br>Sem fatura em aberto'}`
+    : x.tipo === 'cartao_debito' ? 'Débito em conta' : `<b>${brl(x.saldo?.saldo)}</b>${x.saldo?.informado ? ` <small>(base ${dt(x.saldo.data_base)})</small>` : ' <small>(saldo ainda não informado)</small>'}`;
+  const campos = (x = {}, p = 'n') => `
+    <label>Tipo<select class="cf-tipo" id="${p}Tipo">${Object.entries(d.tipos).map(([k, v]) => `<option value="${k}" ${k === (x.tipo || 'banco') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+    <label>Nome<input class="cf-nome" value="${esc(x.nome || '')}" placeholder="ex.: Itaú PJ, Nubank, Carteira"></label>
+    <label class="cf-so" data-so="banco cartao_credito cartao_debito">Banco / emissor<input class="cf-inst" value="${esc(x.instituicao || '')}" placeholder="ex.: Itaú"></label>
+    <label class="cf-so" data-so="cartao_credito cartao_debito banco">Final<input class="cf-final" value="${esc(x.final || '')}" inputmode="numeric" maxlength="4" placeholder="1234"></label>
+    <label class="cf-so" data-so="cartao_credito">Limite<input class="cf-limite" value="${x.limite || ''}" inputmode="decimal" placeholder="5000"></label>
+    <label class="cf-so" data-so="cartao_credito">Dia do fechamento<input class="cf-fech" value="${x.dia_fechamento || ''}" inputmode="numeric" placeholder="3"></label>
+    <label class="cf-so" data-so="cartao_credito">Dia do vencimento<input class="cf-venc" value="${x.dia_vencimento || ''}" inputmode="numeric" placeholder="10"></label>`;
+  const item = (x) => `<div class="cf-item${x.ativo ? '' : ' off'}" data-id="${x.id}">
+      <span class="cf-ic" aria-hidden="true"><svg class="ic" viewBox="0 0 24 24">${icTipo[x.tipo] || icTipo.outro}</svg></span>
+      <div class="cf-txt"><b>${esc(x.rotulo)}</b> <small>${esc(x.tipo_nome)}${x.instituicao ? ' · ' + esc(x.instituicao) : ''}${x.ativo ? '' : ' · desativada'}</small><div class="cf-info">${info(x)}</div></div>
+      <div class="cf-acoes">
+        ${/cartao/.test(x.tipo) ? '' : `<button type="button" class="btn-h sec cf-saldo">Informar saldo</button>`}
+        <label class="pc-ativo"><input type="checkbox" class="cf-on" ${x.ativo ? 'checked' : ''}> ativa</label>
+        <button type="button" class="icone cf-edit" aria-label="Editar ${esc(x.rotulo)}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></svg></button>
+        <button type="button" class="icone cf-del" aria-label="Remover ${esc(x.rotulo)}" title="${x.usos ? 'Tem lançamentos: será só desativada' : 'Remover'}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>
+      </div>
+      <div class="cf-saldo-form" hidden><label class="so-leitor" for="sv${x.id}">Saldo de hoje</label><input id="sv${x.id}" inputmode="decimal" placeholder="Saldo hoje, ex.: 12.500,00"><button type="button" class="btn-h pri cf-saldo-ok">Salvar</button></div>
+      <div class="cf-form cf-edit-form" hidden>${campos(x, 'e' + x.id)}<button type="button" class="btn-h pri cf-edit-ok">Salvar</button></div>
+    </div>`;
+  const corpo = chips + `
+    <section class="cartao cf-cart"><div class="cf-cab"><h3>${esc(sel.carteira)} <small>${sel.pf ? 'Pessoa física' : 'Empresa'} · ${sel.lancamentos} lançamentos</small></h3>
+      <div class="cf-cab-ac"><button type="button" class="chip-link" id="cfRen">Renomear</button>${sel.lancamentos ? '' : '<button type="button" class="chip-link" id="cfRem">Remover carteira</button>'}</div></div>
+      <div class="cf-form" id="cfRenForm" hidden><label class="so-leitor" for="cfRenNome">Novo nome</label><input id="cfRenNome" value="${esc(sel.carteira)}"><button type="button" class="btn-h pri" id="cfRenOk">Salvar nome</button></div>
+      ${sel.contas.length ? sel.contas.map(item).join('') : `<p class="d">Nenhuma conta cadastrada. Sem contas, a Tina controla só o saldo geral da carteira. Cadastre abaixo para separar por banco, cartão e dinheiro.</p>`}
+    </section>
+    <section class="cartao cf-nova"><h3>Adicionar em ${esc(sel.carteira)}</h3><div class="cf-form">${campos({}, 'n')}<button type="button" class="btn-h pri" id="cfAdd">Adicionar</button></div></section>
+    ${novaCarteira}`;
+  return { titulo: 'Contas e cartões', sub, corpo, depois: () => {
+    const raiz = $('#tela-config'); raiz.classList.add('tela-fin');
+    const mostrarCampos = (form) => { const t = form.querySelector('.cf-tipo').value; form.querySelectorAll('.cf-so').forEach(l => l.hidden = !l.dataset.so.split(' ').includes(t)); };
+    const ler = (form) => ({ tipo: form.querySelector('.cf-tipo').value, nome: form.querySelector('.cf-nome').value, instituicao: form.querySelector('.cf-inst').value, final: form.querySelector('.cf-final').value, limite: form.querySelector('.cf-limite').value.replace(/\./g, '').replace(',', '.'), dia_fechamento: form.querySelector('.cf-fech').value, dia_vencimento: form.querySelector('.cf-venc').value });
+    raiz.querySelectorAll('.cf-form').forEach(f => { if (f.querySelector('.cf-tipo')) { mostrarCampos(f); f.querySelector('.cf-tipo').onchange = () => mostrarCampos(f); } });
+    raiz.querySelectorAll('[data-cfc]').forEach(b => b.onclick = () => { cfEstado.carteira = b.dataset.cfc; mostrarTela('contasfin'); });
+    $('#cfAdd').onclick = async () => { const r = await pp('/api/fin/contas', { carteira: sel.carteira, ...ler($('.cf-nova .cf-form')) }); if (!r?.erro) { toast('Cadastrada e ativa'); mostrarTela('contasfin'); } };
+    raiz.querySelectorAll('.cf-item').forEach(el => {
+      const x = sel.contas.find(c => String(c.id) === el.dataset.id);
+      el.querySelector('.cf-on').onchange = async (e) => { const r = await pp('/api/fin/contas', { ...x, ativo: e.target.checked }); if (!r?.erro) { toast(e.target.checked ? 'Ativada' : 'Desativada'); mostrarTela('contasfin'); } };
+      el.querySelector('.cf-edit').onclick = () => { const f = el.querySelector('.cf-edit-form'); f.hidden = !f.hidden; };
+      el.querySelector('.cf-edit-ok').onclick = async () => { const r = await pp('/api/fin/contas', { id: x.id, ativo: !!x.ativo, ...ler(el.querySelector('.cf-edit-form')) }); if (!r?.erro) { toast('Salvo'); mostrarTela('contasfin'); } };
+      el.querySelector('.cf-del').onclick = async (e) => { const b = e.currentTarget; if (!b.dataset.conf) { b.dataset.conf = 1; b.classList.add('perigo'); toast('Clique de novo para confirmar'); return; }
+        const r = await del('/api/fin/contas/' + x.id); if (r?.erro) return toast(r.erro); toast(r.desativada ? `Desativada (tem ${r.usos} lançamentos)` : 'Removida'); mostrarTela('contasfin'); };
+      const bs = el.querySelector('.cf-saldo'); if (bs) { bs.onclick = () => { const f = el.querySelector('.cf-saldo-form'); f.hidden = !f.hidden; f.querySelector('input').focus(); };
+        el.querySelector('.cf-saldo-ok').onclick = async () => { const r = await pp('/api/fin/saldo', { conta_fin_id: x.id, saldo: el.querySelector('.cf-saldo-form input').value }); if (!r?.erro) { toast('Saldo atualizado'); mostrarTela('contasfin'); } }; }
+    });
+    $('#cfRen').onclick = () => { $('#cfRenForm').hidden = !$('#cfRenForm').hidden; };
+    $('#cfRenOk').onclick = async () => { const nome = $('#cfRenNome').value.trim(); const r = await pp('/api/fin/carteiras', { acao: 'renomear', carteira: sel.carteira, nome }); if (!r?.erro) { cfEstado.carteira = nome; toast('Carteira renomeada'); mostrarTela('contasfin'); } };
+    $('#cfRem') && ($('#cfRem').onclick = async (e) => { const b = e.currentTarget; if (!b.dataset.conf) { b.dataset.conf = 1; b.textContent = 'Confirmar remoção'; b.classList.add('perigo'); return; }
+      const r = await pp('/api/fin/carteiras', { acao: 'remover', carteira: sel.carteira }); if (!r?.erro) { cfEstado.carteira = ''; toast('Carteira removida'); mostrarTela('contasfin'); } });
+    ligarNovaCarteira();
+  } };
+};
+function ligarNovaCarteira() {
+  $('#tela-config')?.classList.add('tela-fin');
+  $('#ncAdd') && ($('#ncAdd').onclick = async () => { const nome = $('#ncNome').value.trim(); const r = await pp('/api/fin/carteiras', { acao: 'adicionar', nome }); if (!r?.erro) { cfEstado.carteira = nome; toast('Carteira criada'); mostrarTela('contasfin'); } });
+}
