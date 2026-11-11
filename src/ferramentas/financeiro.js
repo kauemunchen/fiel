@@ -205,6 +205,7 @@ export async function executar(nome, a, conta) {
       const igual = db.prepare("SELECT id, descricao, vencimento FROM fin_lancamentos WHERE conta_id=? AND carteira=? AND status='previsto' AND oculto=0 AND tipo=? AND abs(valor-?)<0.01 LIMIT 1").get(c, cart, a.tipo === 'entrada' ? 'entrada' : 'saida', v);
       if (igual && !a.forcar_novo) throw new Error(`já existe a conta prevista #${igual.id} "${igual.descricao}" (venc. ${igual.vencimento}) com esse valor. Se o dono disse que pagou, use dar_baixa nela; só registre novo se for outra despesa (forcar_novo=true).`);
       const regra = !a.categoria ? aplicarRegras(c, cart, a.descricao) : null;
+      if (a.data && a.data > hoje()) a.data = hoje(); // já aconteceu: nunca data futura
       const id = Number(db.prepare("INSERT INTO fin_lancamentos (conta_id, carteira, tipo, valor, descricao, categoria, subcategoria, contraparte, status, data, pago_em, origem) VALUES (?,?,?,?,?,?,?,?,'pago',?,?,'manual')").run(c, cart, a.tipo === 'entrada' ? 'entrada' : 'saida', v, a.descricao, a.categoria || regra?.categoria || null, a.subcategoria || regra?.subcategoria || null, a.contraparte || null, a.data || hoje(), a.data || hoje()).lastInsertRowid);
       return { ok: true, id, carteira: cart, valor: v, categoria: a.categoria || regra?.categoria || 'sem categoria — pergunte ou use recategorizar' };
     }
@@ -220,7 +221,7 @@ export async function executar(nome, a, conta) {
       if (!a.comprovante && !a.extrato_id) throw new Error('Baixa sem comprovante nem extrato. Peça o comprovante (foto/print do pix) ou o extrato.');
       const p = db.prepare("SELECT * FROM fin_lancamentos WHERE id=? AND conta_id=?").get(Number(a.id), c); if (!p) throw new Error(`lançamento #${a.id} não encontrado`);
       if (p.status === 'pago') return { ok: true, ja_estava_pago: true, id: p.id };
-      const data = a.data || hoje(); const valor = a.valor_pago ? Math.abs(Number(a.valor_pago)) : p.valor;
+      const data = a.data && a.data <= hoje() ? a.data : hoje(); const valor = a.valor_pago ? Math.abs(Number(a.valor_pago)) : p.valor; // pagamento nunca com data futura
       db.prepare("UPDATE fin_lancamentos SET status='pago', pago_em=?, valor=?, comprovante=?, conciliado_id=? WHERE id=?").run(data, valor, a.comprovante || `extrato #${a.extrato_id}`, a.extrato_id || null, p.id);
       if (a.extrato_id) db.prepare('UPDATE fin_lancamentos SET oculto=1 WHERE id=? AND conta_id=?').run(Number(a.extrato_id), c);
       const proxima = criarProximaRecorrencia(p);
