@@ -461,7 +461,7 @@ const dataBR = (d) => d ? d.slice(8, 10) + '/' + d.slice(5, 7) : '';
 const mesNome = (m) => new Date(m + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
 const mesLongo = (m) => (t => t.charAt(0).toUpperCase() + t.slice(1))(new Date(m + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
 function graficoPrevisao(serie) {
-  const W = 720, H = 220, pl = 56, pr = 16, pt = 16, pb = 28; const vs = serie.map(p => p.v);
+  const W = innerWidth < 640 ? 400 : 720, H = 220, pl = 56, pr = 16, pt = 16, pb = 28; const vs = serie.map(p => p.v);
   let lo = Math.min(...vs), hi = Math.max(...vs); if (hi - lo < Math.max(1, Math.abs(hi) * .1)) { const m = Math.max(1, Math.abs(hi) * .1); lo -= m; hi += m; } const pad = (hi - lo) * .12; lo -= pad; hi += pad;
   const x = (i) => pl + i / (serie.length - 1) * (W - pl - pr), y = (v) => pt + (hi - v) / (hi - lo) * (H - pt - pb);
   const ticks = [lo, (lo + hi) / 2, hi].map(v => Math.round(v));
@@ -478,7 +478,7 @@ function graficoPrevisao(serie) {
     </svg><div class="g-tip" hidden></div></div>`;
 }
 function graficoMeses(hist) {
-  const W = 720, H = 220, pl = 56, pr = 16, pt = 16, pb = 28; const max = Math.max(1, ...hist.flatMap(h => [h.recebido, h.pago]));
+  const W = innerWidth < 640 ? 400 : 720, H = 220, pl = 56, pr = 16, pt = 16, pb = 28; const max = Math.max(1, ...hist.flatMap(h => [h.recebido, h.pago]));
   const gw = (W - pl - pr) / hist.length, bw = Math.min(26, gw / 3), y = (v) => pt + (1 - v / max) * (H - pt - pb), base = H - pb;
   const ticks = [0, max / 2, max];
   const barra = (xx, v, cls, tip) => { const h = Math.max(0, base - y(v)); const r = Math.min(4, h); return `<path class="${cls}" data-tip="${tip}" d="M${xx},${base}V${base - h + r}Q${xx},${base - h} ${xx + r},${base - h}H${xx + bw - r}Q${xx + bw},${base - h} ${xx + bw},${base - h + r}V${base}Z"/><rect class="g-hit" data-tip="${tip}" x="${xx - 2}" y="${pt}" width="${bw + 4}" height="${base - pt}"/>`; };
@@ -519,7 +519,7 @@ telas.financeiro = async () => {
   const a = d.mes_atual, p = d.mes_anterior, delta = a.resultado - p.resultado;
   const kpi = (rot, val, sub, cls = '') => `<div class="fin-kpi ${cls}"><span class="r">${rot}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
   const kpis = `<div class="fin-kpis">
-    ${kpi('Saldo hoje', brlF(d.saldo.hoje), d.saldo.por_carteira.length > 1 ? d.saldo.por_carteira.map(s => `${esc(s.carteira)} ${brlF(s.saldo)}`).join(' · ') : esc(d.saldo.por_carteira[0]?.base || ''), 'destaque')}
+    ${kpi('Saldo hoje', brlF(d.saldo.hoje), d.saldo.por_carteira.length > 1 ? (l => l.slice(0, 4).map(s => `<span class="fin-sc"><i>${esc(s.carteira)}</i> ${brlF(s.saldo)}</span>`).join('') + (l.length > 4 ? `<span class="fin-sc"><i>+${l.length - 4} carteiras</i></span>` : ''))(d.saldo.por_carteira.filter(s => Math.abs(s.saldo) >= 0.01).sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo))) : esc(d.saldo.por_carteira[0]?.base || ''), 'destaque')}
     ${kpi(`Resultado de ${mesNome(d.mes)}`, brlF(a.resultado, true), `${delta >= 0 ? '▲' : '▼'} ${brlF(Math.abs(delta))} vs ${mesNome(p.mes)}`, a.resultado < 0 ? 'neg' : '')}
     ${kpi('Recebido no mês', brlF(a.recebido), `${mesNome(p.mes)}: ${brlF(p.recebido)}`)}
     ${kpi('Pago no mês', brlF(a.pago), `${mesNome(p.mes)}: ${brlF(p.pago)}`)}
