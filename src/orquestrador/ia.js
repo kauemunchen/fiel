@@ -133,6 +133,7 @@ AGORA: ${agoraBR()} (America/Sao_Paulo). Datas relativas ("amanhã", "quinta") s
     // Alguma ação do lote exige confirmação? Guarda o LOTE inteiro (todas as chamadas desta rodada) e pergunta uma vez só.
     if (autoConfirmar) { const bloqueada = calls.find(c => precisaConfirmar(modulo, c.name) && !AUTO_OK.has(c.name)); if (bloqueada) return `ERRO: o lote pediu "${descreverAcao(bloqueada)}", que precisa da sua confirmação e não roda em segundo plano.`; }
     else if (calls.some(c => precisaConfirmar(modulo, c.name))) {
+      db.prepare('DELETE FROM pendencias WHERE chat_id=?').run(msg.chatId);
       db.prepare('INSERT INTO pendencias (conta_id, chat_id, modulo, ferramenta, args) VALUES (?,?,?,?,?)').run(conta.id, msg.chatId, modulo, '__lote__', JSON.stringify(calls.map(c => ({ name: c.name, args: c.args }))));
       const email = calls.find(c => c.name === 'enviar_email');
       if (email && calls.length === 1) {

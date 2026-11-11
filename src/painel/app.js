@@ -181,8 +181,11 @@ function avisoEnvio(nome) {
     erro(msg, tentar) { el.classList.add('erro'); el.innerHTML = `⚠️ Não consegui enviar <b>${esc(nome)}</b> (${esc(msg)}). <button type="button">Tentar de novo</button>`; el.querySelector('button').onclick = () => { el.remove(); tentar(); }; },
   };
 }
+let ultimoEnvio = { t: '', em: 0 };
 async function enviar(texto, arquivo, extra = {}) {
   if (!texto && !arquivo) return;
+  // Clique duplo em botão/atalho não manda a mesma mensagem duas vezes.
+  if (texto && !arquivo && texto === ultimoEnvio.t && Date.now() - ultimoEnvio.em < 5000) return; if (texto && !arquivo) ultimoEnvio = { t: texto, em: Date.now() };
   const fd = new FormData(); if (texto) fd.append('texto', texto); for (const [k, v] of Object.entries(extra)) fd.append(k, v);
   if (!arquivo) return api('/api/enviar', { method: 'POST', body: fd });
   fd.append('arquivo', arquivo, arquivo.name || 'audio.webm');

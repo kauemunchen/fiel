@@ -218,6 +218,10 @@ export async function tratarMensagem(msg, canal) {
     return `👍 Ok, não fiz nada — descartei: ${acoes.map(a => descreverAcao(a)).join('; ')}. Tudo continua como estava.`;
   }
 
+  // Mensagem nova que não é sim/não: a pendência perdeu o contexto. Descarta para um "sim" futuro
+  // (respondendo a OUTRA pergunta) nunca executar a ação antiga por engano.
+  if (pend) db.prepare('DELETE FROM pendencias WHERE chat_id=?').run(msg.chatId);
+
   const gov = await governanca(msg, conta); if (gov) return gov;
 
   const ativos = modulosAtivos(conta.id);
