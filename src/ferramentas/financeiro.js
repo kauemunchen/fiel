@@ -23,6 +23,36 @@ export function prepararFinanceiro() {
 }
 prepararFinanceiro();
 
+/**
+ * Reparo único (2026-11): transferências entre contas que a Tina lançou como receita + despesa
+ * (par entrada/saída, mesma carteira, mesmo valor e dia, descrição de transferência) viram categoria
+ * Transferência; pares repetidos registrados em minutos são ocultados (reversível). Não muda saldo.
+ */
+export function reparoTransferencias() {
+  db.exec('CREATE TABLE IF NOT EXISTS reparos (nome TEXT PRIMARY KEY, feito_em TEXT DEFAULT CURRENT_TIMESTAMP, resumo TEXT)');
+  if (db.prepare("SELECT 1 FROM reparos WHERE nome='transferencias-2026-11'").get()) return null;
+  const transf = /transfer|\bted\b|\bdoc\b/i; let recat = 0, ocult = 0;
+  const cands = db.prepare("SELECT * FROM fin_lancamentos WHERE status='pago' AND oculto=0 AND COALESCE(categoria,'')<>'Transferência' AND COALESCE(pago_em,data) >= date('now','-5 days') ORDER BY id").all().filter(l => transf.test(l.descricao || ''));
+  const usados = new Set(); const pares = [];
+  for (const s of cands.filter(l => l.tipo === 'saida')) {
+    const e = cands.find(l => l.tipo === 'entrada' && !usados.has(l.id) && l.conta_id === s.conta_id && l.carteira === s.carteira && Math.abs(l.valor - s.valor) < 0.01 && (l.pago_em || l.data) === (s.pago_em || s.data)
+      && Math.abs(new Date(l.criado_em + 'Z') - new Date(s.criado_em + 'Z')) < 30 * 60e3);
+    if (e) { usados.add(e.id); usados.add(s.id); pares.push([s, e]); }
+  }
+  db.transaction(() => {
+    const vistos = [];
+    for (const [s, e] of pares) {
+      const rep = vistos.find(([s2]) => s2.conta_id === s.conta_id && s2.carteira === s.carteira && Math.abs(s2.valor - s.valor) < 0.01 && (s2.pago_em || s2.data) === (s.pago_em || s.data) && Math.abs(new Date(s.criado_em + 'Z') - new Date(s2.criado_em + 'Z')) < 15 * 60e3);
+      if (rep) { db.prepare("UPDATE fin_lancamentos SET oculto=1, comprovante=COALESCE(comprovante,'') || ' [oculto: transferência repetida]' WHERE id IN (?,?)").run(s.id, e.id); ocult += 2; continue; }
+      vistos.push([s, e]);
+      for (const l of [s, e]) { const enc = PL.encaixarNoPlano(l.conta_id, l.carteira, l.tipo, { categoria: 'Transferência' }).a; db.prepare('UPDATE fin_lancamentos SET categoria=?, subcategoria=? WHERE id=?').run('Transferência', enc.subcategoria || null, l.id); recat++; }
+    }
+    db.prepare("INSERT INTO reparos (nome, resumo) VALUES ('transferencias-2026-11', ?)").run(`${recat} recategorizados, ${ocult} ocultados`);
+  })();
+  return { recat, ocult };
+}
+setTimeout(() => { try { const r = reparoTransferencias(); if (r) console.log('[financeiro] reparo transferências', r); } catch (e) { console.error('[financeiro] reparo transferências', e.message); } }, 3000);
+
 // ---------- plano de contas KM ----------
 export const PLANO_PJ = ['Receita operacional', 'Outras receitas', 'Custos variáveis', 'Despesas fixas', 'Despesas financeiras', 'Investimentos', 'Retiradas'];
 export const PLANO_PF = ['Renda', 'Moradia', 'Alimentação', 'Transporte', 'Saúde', 'Educação', 'Lazer', 'Assinaturas', 'Outros'];
@@ -203,6 +233,7 @@ export function ferramentas(_conta) {
     { name: 'recategorizar', description: 'Corrige a categoria de lançamentos (por ids ou por texto na descrição). criar_regra=true faz a correção valer para os próximos (a Tina aprende).', parameters: obj({ ids: { type: 'ARRAY', items: N }, texto: S, carteira: S, categoria: S, subcategoria: S, conta_plano: S, criar_regra: B }) },
     { name: 'importar_extrato_pendente', description: 'Importa um extrato que já foi lido e estava aguardando o dono dizer a carteira.', parameters: obj({ importacao_id: N, carteira: S }, ['importacao_id', 'carteira']) },
     { name: 'listar_contas_financeiras', description: 'Lista contas bancárias, cartões (crédito/débito) e dinheiro de cada carteira, com saldo (banco/dinheiro) e fatura aberta (cartão de crédito).', parameters: obj({ carteira: S }) },
+    { name: 'transferencia_entre_contas', description: 'Registra dinheiro que passou de uma conta para outra do próprio dono (ex.: "transferi 18 mil do BB para o Porto Seguro", "saquei 500", "depositei no Itaú"). NÃO é receita nem despesa: o saldo total não muda, só sai de uma conta e entra na outra. Use SEMPRE isto em vez de registrar_lancamento para transferências. Contas que ainda não existem na carteira são cadastradas como conta bancária ("dinheiro"/"carteira" vira Dinheiro). Se as contas forem de carteiras diferentes (ex.: da empresa para a pessoal), informe carteira_destino.', parameters: obj({ carteira: S, de: S, para: S, valor: N, data: S, carteira_destino: S, descricao: S }, ['carteira', 'de', 'para', 'valor']) },
     { name: 'ficha_carteira', description: 'Define se a carteira é de uma empresa (pj) ou de uma pessoa (pf) e o titular (razão social ou nome completo). Use quando o dono disser de quem é a carteira.', parameters: obj({ carteira: S, tipo: { type: 'STRING', enum: ['pj', 'pf'] }, titular: S }, ['carteira', 'tipo']) },
     { name: 'cadastrar_conta_financeira', description: 'Cadastra uma conta bancária, cartão de crédito, cartão de débito ou dinheiro numa carteira. Cartão de crédito: informe dia_fechamento e dia_vencimento. O dono também cadastra no painel: Mais › Contas e cartões.', parameters: obj({ carteira: S, nome: S, tipo: { type: 'STRING', enum: ['banco', 'cartao_credito', 'cartao_debito', 'dinheiro', 'outro'] }, instituicao: S, final: S, limite: N, dia_fechamento: N, dia_vencimento: N }, ['carteira', 'nome', 'tipo']) },
     { name: 'pagar_fatura_cartao', description: 'Dá baixa na fatura de um cartão de crédito (todas as compras daquele vencimento), quando o dono disser que pagou. pago_com = conta bancária de onde saiu o dinheiro.', parameters: obj({ cartao: S, carteira: S, vencimento: S, pago_com: S, comprovante: S }, ['cartao']) },
@@ -299,6 +330,26 @@ export async function executar(nome, a, conta) {
       const cart = a.carteira ? resolverCarteira(c, a.carteira) : null; const l = CF.listarContasFin(c, cart);
       if (!l.length) return { contas: [], dica: 'Nenhuma conta ou cartão cadastrado. Cadastre com cadastrar_conta_financeira ou no painel (Mais › Contas e cartões).' };
       return { contas: l.map(x => ({ carteira: x.carteira, conta: CF.rotuloConta(x), tipo: CF.TIPOS[x.tipo], ...(x.tipo === 'cartao_credito' ? { faturas_abertas: CF.faturasCartao(c, x.id), limite: x.limite, fecha_dia: x.dia_fechamento, vence_dia: x.dia_vencimento } : x.tipo === 'cartao_debito' ? {} : CF.saldoContaFin(c, x.id)) })) };
+    }
+    case 'transferencia_entre_contas': {
+      const cart = resolverCarteira(c, a.carteira); const cartD = a.carteira_destino ? resolverCarteira(c, a.carteira_destino) : cart;
+      const v = Math.abs(Number(a.valor)); if (!v) throw new Error('valor inválido'); const dia = a.data && a.data <= hoje() ? a.data : hoje();
+      const garantir = (carteira, ref) => { const achou = CF.acharContaFin(c, carteira, ref); if (achou) return { conta: achou, nova: false };
+        const tipo = /dinheiro|esp[eé]cie|carteira|caixa/i.test(ref) ? 'dinheiro' : 'banco'; const nomeC = String(ref).replace(/^(a |o )?(conta (do|da|de)\s+)?/i, '').trim().slice(0, 60) || ref;
+        const id = Number(db.prepare('INSERT INTO fin_contas (conta_id, carteira, nome, tipo) VALUES (?,?,?,?)').run(c, carteira, nomeC, tipo).lastInsertRowid);
+        return { conta: db.prepare('SELECT * FROM fin_contas WHERE id=?').get(id), nova: true }; };
+      const o = garantir(cart, a.de), d = garantir(cartD, a.para);
+      if (/cartao/.test(o.conta.tipo) || /cartao/.test(d.conta.tipo)) throw new Error('transferência é entre contas bancárias/dinheiro. Pagamento de fatura: use pagar_fatura_cartao.');
+      const mesma = cart === cartD; const desc = a.descricao || `Transferência ${CF.rotuloConta(o.conta)} → ${CF.rotuloConta(d.conta)}`;
+      const dup = db.prepare("SELECT id FROM fin_lancamentos WHERE conta_id=? AND carteira=? AND tipo='saida' AND categoria IN ('Transferência','Retiradas') AND abs(valor-?)<0.01 AND COALESCE(pago_em,data)=? AND conta_fin_id=? AND oculto=0 AND criado_em > datetime('now','-10 minutes')").get(c, cart, v, dia, o.conta.id);
+      if (dup) return { ok: true, ja_registrada: true, aviso: 'Essa transferência já foi registrada agora há pouco; não lancei de novo.' };
+      const catS = mesma ? 'Transferência' : (CF.ehPFCarteira(c, cart) ? 'Transferência' : 'Retiradas'); const catE = mesma ? 'Transferência' : (CF.ehPFCarteira(c, cartD) ? 'Renda' : 'Outras receitas');
+      const ins = (carteira, tipo, cat, contaFin) => { const e = PL.encaixarNoPlano(c, carteira, tipo, { categoria: cat }).a;
+        return Number(db.prepare("INSERT INTO fin_lancamentos (conta_id, carteira, tipo, valor, descricao, categoria, subcategoria, status, data, pago_em, origem, conta_fin_id) VALUES (?,?,?,?,?,?,?,'pago',?,?,'transferencia',?)").run(c, carteira, tipo, v, desc, e.categoria, e.subcategoria || null, dia, dia, contaFin).lastInsertRowid); };
+      const idS = ins(cart, 'saida', catS, o.conta.id), idE = ins(cartD, 'entrada', catE, d.conta.id);
+      return { ok: true, valor: v, de: `${CF.rotuloConta(o.conta)} (${cart})`, para: `${CF.rotuloConta(d.conta)} (${cartD})`, lancamentos: [idS, idE],
+        efeito: mesma ? 'saldo total da carteira não muda; não entra como receita nem despesa' : `sai de ${cart} como ${catS} e entra em ${cartD} como ${catE}`,
+        contas_criadas: [o, d].filter(x => x.nova).map(x => CF.rotuloConta(x.conta)), dica: [o, d].some(x => x.nova) ? 'Contas novas foram cadastradas sem saldo; o dono pode informar o saldo de cada uma em Mais › Contas e cartões.' : undefined };
     }
     case 'ficha_carteira': { const cart = resolverCarteira(c, a.carteira); CF.salvarFicha(c, cart, { tipo: a.tipo, titular: a.titular }); return { ok: true, carteira: cart, ...CF.fichaCarteira(c, cart) }; }
     case 'cadastrar_conta_financeira': {

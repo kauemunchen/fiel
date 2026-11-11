@@ -75,6 +75,10 @@ export function acharConta(contaId, carteira, ref, tipo) {
  */
 export function encaixarNoPlano(contaId, carteira, tipo, a) {
   if (!planoAtivo(contaId, carteira)) return { a };
+  if (a.categoria === 'Transferência' && !a.conta_plano) { // transferência entre contas: conta própria do plano, nunca pergunta
+    const t = contasPlano(contaId, carteira).find(c => c.grupo === 'Transferência');
+    return t ? { a: { ...a, categoria: 'Transferência', subcategoria: rotulo(t) }, conta_plano: rotulo(t) } : { a };
+  }
   if (a.conta_plano) {
     const c = acharConta(contaId, carteira, a.conta_plano, tipo);
     if (!c) throw new Error(`"${a.conta_plano}" não está no plano de contas da carteira ${carteira}. Contas de ${tipo === 'entrada' ? 'entrada' : 'saída'}: ${contasPlano(contaId, carteira).filter(x => x.tipo === tipo).map(rotulo).join(' · ')}`);
