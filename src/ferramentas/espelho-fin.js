@@ -10,7 +10,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS fin_espelho (conta_id INTEGER PRIMARY KEY, s
 
 const link = (id) => `https://docs.google.com/spreadsheets/d/${id}/edit`;
 export const espelhoDe = (contaId) => db.prepare('SELECT * FROM fin_espelho WHERE conta_id=?').get(contaId) || null;
-const CAB = ['ID', 'Data', 'Mês', 'Vencimento', 'Carteira', 'PJ/PF', 'Tipo', 'Status', 'Descrição', 'Contraparte', 'Categoria', 'Conta do plano', 'Conta/cartão', 'Valor', 'Valor (±)', 'Transferência', 'Origem'];
+const CAB = ['ID', 'Data', 'Mês', 'Vencimento', 'Carteira', 'PJ/PF', 'Tipo', 'Status', 'Descrição', 'Contraparte', 'Categoria', 'Conta do plano', 'Conta (saiu de / entrou em)', 'Valor', 'Valor (±)', 'Transferência', 'Origem'];
 const serial = (iso) => iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? Math.round((Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 864e5) : '';
 const agoraBR = () => new Date(Date.now() - 3 * 3600e3).toISOString().replace('T', ' ').slice(0, 16).split(' ').map((p, i) => i ? p : p.split('-').reverse().join('/')).join(' ');
 const STATUS = { pago: 'Pago', previsto: 'Previsto', pendente: 'Pendente' };
@@ -47,7 +47,7 @@ const soma = (...cond) => `=SUMPRODUCT(${L('N')}*${[...cond, cart, mes, conta].j
 const W = (comMes = true) => `&IF($B$4="Todas",""," and E = '"&$B$4&"'")${comMes ? `&IF($B$5="Todos",""," and C = '"&$B$5&"'")` : ''}&IF($B$6="Todas",""," and M = '"&$B$6&"'")`;
 const PAINEL = [
   ['Espelho financeiro · Fiel'], ['Atualizado pelo Fiel'], [],
-  ['Carteira', 'Todas'], ['Mês', 'Todos'], ['Conta / cartão', 'Todas'], ['Escolha nos campos acima. "Todas/Todos" mostra tudo.'], [],
+  ['Carteira', 'Todas'], ['Mês', 'Todos'], ['Conta (saiu de / entrou em)', 'Todas'], ['Escolha nos campos acima. "Todas/Todos" mostra tudo.'], [],
   ['Saldo atual', `=IF($B$6="Todas",SUMPRODUCT(Contas!D2:D*(Contas!B2:B="Carteira")*((Contas!A2:A=$B$4)+($B$4="Todas")>0)),SUMPRODUCT(Contas!D2:D*(Contas!C2:C=$B$6)*(Contas!B2:B<>"Carteira")))`],
   ['Recebido', soma(`(${L('G')}="Entrada")`, `(${L('H')}="Pago")`, `(${L('P')}="Não")`)],
   ['Pago', soma(`(${L('G')}="Saída")`, `(${L('H')}="Pago")`, `(${L('P')}="Não")`)],
@@ -128,7 +128,7 @@ export async function sincronizar(contaId, { forcar = false, ignorarEdicao = fal
     const svc = await svcDe(contaId); const id = e.spreadsheet_id;
     const meta = await svc.spreadsheets.get({ spreadsheetId: id, fields: 'sheets.properties' }); const sid = (t) => meta.data.sheets.find(s => s.properties.title === t)?.properties.sheetId;
     await svc.spreadsheets.values.batchClear({ spreadsheetId: id, requestBody: { ranges: ["'Lançamentos'!A2:Q", 'Contas!A2:E'] } });
-    const data = [{ range: 'Painel!A2', values: [[`Atualizado pelo Fiel em ${agoraBR()} · ${linhas.length} lançamentos. As abas Lançamentos e Contas são reescritas a cada atualização; crie suas próprias abas à vontade.`]] }];
+    const data = [{ range: "'Lançamentos'!A1", values: [CAB] }, { range: 'Painel!A2', values: [[`Atualizado pelo Fiel em ${agoraBR()} · ${linhas.length} lançamentos. As abas Lançamentos e Contas são reescritas a cada atualização; crie suas próprias abas à vontade.`]] }];
     if (linhas.length) data.push({ range: "'Lançamentos'!A2", values: linhas }); if (contas.length) data.push({ range: 'Contas!A2', values: contas });
     await svc.spreadsheets.values.batchUpdate({ spreadsheetId: id, requestBody: { valueInputOption: 'USER_ENTERED', data } });
     const sP = sid('Painel');

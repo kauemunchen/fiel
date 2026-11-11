@@ -311,6 +311,8 @@ export function rotasDados(app) {
       const e = E.espelhoDe(req.contaId); res.json({ ok: true, link: `https://docs.google.com/spreadsheets/d/${e.spreadsheet_id}/edit` }); }
     catch (err) { res.status(400).json({ erro: /conectado|autoriza|conectar google/i.test(err.message) ? 'Conecte o Google primeiro (Mais › Conexões).' : String(err.message).slice(0, 200) }); }
   });
+  app.post('/api/fin/lancamento/:id/conta', auth, async (req, res) => { const F = await import('../ferramentas/financeiro.js'); const conta = db.prepare('SELECT * FROM contas WHERE id=?').get(req.contaId);
+    try { const r = await F.executar('definir_conta_lancamento', { id: Number(req.params.id), conta: String(req.body?.conta || '') }, conta); res.json(r); } catch (err) { res.status(400).json({ erro: String(err.message).slice(0, 200) }); } });
   app.post('/api/fin/saldo', auth, async (req, res) => {
     const id = req.contaId; const b = req.body || {}; const x = db.prepare('SELECT * FROM fin_contas WHERE id=? AND conta_id=?').get(Number(b.conta_fin_id), id);
     if (!x || /cartao/.test(x.tipo)) return res.status(400).json({ erro: 'saldo só para conta bancária ou dinheiro' });
