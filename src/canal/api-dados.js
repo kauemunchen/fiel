@@ -127,6 +127,10 @@ export function rotasDados(app) {
     for (const p of q(`SELECT id, tema FROM posts WHERE conta_id=? AND status='erro' ORDER BY id DESC LIMIT 3`, id))
       precisa.push({ tipo: 'post', modulo: 'social', quem: quem('social'), titulo: `Post não publicou: ${curto(p.tema || 'sem tema', 50)}`, detalhe: 'precisa tentar de novo', alerta: true,
         acoes: [{ rotulo: 'Abrir no calendário', tela: 'editorial' }, { rotulo: 'Descartar', excluir: `/api/editorial/${p.id}`, sec: true }] });
+    // Fim do período sem limite (cupom): aparece nos últimos 5 dias.
+    try { const C = await import('../creditos/index.js'); const ate = C.ilimitadoAte(id); const adm = q('SELECT admin, plano FROM contas WHERE id=?', id)[0];
+      if (ate && !(adm?.admin === 1 || adm?.plano === 'ilimitado') && !q("SELECT 1 FROM assinaturas WHERE conta_id=? AND status='ativa'", id).length) { const hj = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10); const f = Math.round((Date.parse(ate + 'T12:00:00Z') - Date.parse(hj + 'T12:00:00Z')) / 864e5);
+        if (f <= 5) precisa.push({ tipo: 'plano', modulo: 'diretor', quem: quem('diretor'), titulo: f <= 0 ? 'Seu período sem limite termina hoje' : `Faltam ${f} dia${f > 1 ? 's' : ''} do seu período sem limite`, detalhe: `escolha um plano ou créditos para não parar (${Math.floor(C.saldo(id))} créditos guardados)`, alerta: f <= 2, acoes: [{ rotulo: 'Ver planos', tela: 'creditos' }] }); } } catch (e) { console.error('[hoje] ilimitado', e.message); }
     // Rascunhos sem data: até 2 aparecem um a um; mais que isso viram UM cartão (não lotam a tela).
     const rasc = q(`SELECT id, tema FROM posts WHERE conta_id=? AND status='rascunho' AND data IS NULL ORDER BY id DESC`, id);
     if (rasc.length && rasc.length <= 2) for (const p of rasc)

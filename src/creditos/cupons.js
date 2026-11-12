@@ -90,3 +90,36 @@ export function salvarCupom(b = {}) {
 export function resgatesDoCupom(id) {
   return db.prepare('SELECT r.*, k.nome_dono, k.empresa, k.email FROM cupom_resgates r JOIN contas k ON k.id=r.conta_id WHERE r.cupom_id=? ORDER BY r.id DESC LIMIT 200').all(Number(id));
 }
+
+// ---------- Aviso de fim do período sem limite (5 dias antes, 2 dias antes, último dia e no dia seguinte) ----------
+db.exec('CREATE TABLE IF NOT EXISTS cupom_avisos (resgate_id INTEGER NOT NULL, marco TEXT NOT NULL, enviado_em TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (resgate_id, marco))');
+export function mensagemFimIlimitado(contaId, diasRestantes, ate) {
+  const fmt = ate.split('-').reverse().join('/');
+  const cab = diasRestantes > 1 ? `⏳ *Faltam ${diasRestantes} dias* do seu período sem limite no Fiel (vai até ${fmt}).`
+    : diasRestantes === 1 ? `⏳ *Amanhã* termina o seu período sem limite no Fiel (${fmt}).`
+    : diasRestantes === 0 ? `⏰ *Hoje é o último dia* do seu período sem limite no Fiel.`
+    : `Seu período sem limite no Fiel terminou em ${fmt}.`;
+  return cab;
+}
+export async function avisarFimIlimitado(canal) {
+  const C = await import('./index.js'); const hoje = hojeBR();
+  const rows = db.prepare(`SELECT r.id, r.conta_id, r.ilimitado_ate FROM cupom_resgates r WHERE r.ilimitado_ate IS NOT NULL AND r.ilimitado_ate BETWEEN ? AND ?`).all(somaDias(hoje, -1), somaDias(hoje, 5));
+  for (const r of rows) {
+    const faltam = Math.round((Date.parse(r.ilimitado_ate + 'T12:00:00Z') - Date.parse(hoje + 'T12:00:00Z')) / 864e5);
+    const marco = faltam >= 5 ? 'd5' : faltam >= 2 ? 'd2' : faltam >= 0 ? 'd0' : 'fim';
+    if (faltam > 5 || (marco === 'd5' && faltam !== 5) || (marco === 'd2' && faltam !== 2) || (marco === 'd0' && faltam !== 0)) continue;
+    if (db.prepare('SELECT 1 FROM cupom_avisos WHERE resgate_id=? AND marco=?').get(r.id, marco)) continue;
+    // Outro cupom sem limite que vai mais longe, ou plano mensal ativo: não precisa avisar.
+    const maisLonge = db.prepare('SELECT 1 FROM cupom_resgates WHERE conta_id=? AND ilimitado_ate>? LIMIT 1').get(r.conta_id, r.ilimitado_ate);
+    const plano = (() => { try { return db.prepare("SELECT 1 FROM assinaturas WHERE conta_id=? AND status='ativa'").get(r.conta_id); } catch { return null; } })();
+    db.prepare('INSERT OR IGNORE INTO cupom_avisos (resgate_id, marco) VALUES (?,?)').run(r.id, marco);
+    if (maisLonge || plano) continue;
+    const dono = db.prepare("SELECT chat_id FROM usuarios WHERE conta_id=? AND papel='dono' ORDER BY canal<>'telegram', id LIMIT 1").get(r.conta_id)?.chat_id; if (!dono || !canal) continue;
+    const saldo = C.saldo(r.conta_id); const pacs = C.pacotes(); const mensal = pacs.filter(p => p.tipo === 'mensal'), pre = pacs.filter(p => p.tipo === 'prepago');
+    const corpo = `${mensagemFimIlimitado(r.conta_id, faltam, r.ilimitado_ate)}\n\n${faltam >= 0
+      ? `Depois disso a equipe continua trabalhando com créditos. ${saldo > 0 ? `Você tem *${Math.floor(saldo).toLocaleString('pt-BR')} créditos* guardados.` : 'Hoje você não tem créditos guardados.'} Para não parar:`
+      : `${saldo > 0 ? `A equipe segue usando os seus *${Math.floor(saldo).toLocaleString('pt-BR')} créditos*.` : '*Sem créditos, a equipe pausa as tarefas novas* (agenda e posts já programados continuam).'} Para continuar:`}
+${mensal.map(p => `• *${p.nome}*: ${p.creditos.toLocaleString('pt-BR')} créditos todo mês`).join('\n')}${mensal.length && pre.length ? '\n' : ''}${pre.map(p => `• *${p.nome}*: ${p.creditos.toLocaleString('pt-BR')} créditos que não vencem`).join('\n')}\n\nToque abaixo ou digite *comprar*.`;
+    try { await canal.enviar(r.conta_id, dono, { texto: corpo, botoes: [[{ t: '💳 Ver planos e créditos', d: 'comprar' }]] }); } catch (e) { console.error('[cupons] aviso fim ilimitado', r.conta_id, e.message); }
+  }
+}
