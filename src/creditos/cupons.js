@@ -77,6 +77,7 @@ export function listarCupons() {
   return db.prepare('SELECT c.*, (SELECT COUNT(*) FROM cupom_resgates r WHERE r.cupom_id=c.id) resgates, (SELECT COUNT(*) FROM cobrancas b WHERE b.cupom=c.codigo AND b.status=\'pago\') compras FROM cupons c ORDER BY c.ativo DESC, c.id DESC').all();
 }
 export function salvarCupom(b = {}) {
+  if (b.id) { const atual = db.prepare('SELECT * FROM cupons WHERE id=?').get(Number(b.id)); if (atual) for (const k of ['ilimitado_dias', 'creditos', 'desconto_pct', 'desconto_dias', 'aplica']) if (b[k] === undefined || b[k] === null) b[k] = atual[k]; } // tela antiga sem o campo: mantém o que já estava
   const codigo = normCodigo(b.codigo); if (!/^[A-Z0-9_-]{3,40}$/.test(codigo)) throw new Error('código: 3 a 40 letras/números, sem espaço');
   const creditos = Math.max(0, Math.round(Number(b.creditos) || 0)), pct = Math.min(90, Math.max(0, Number(b.desconto_pct) || 0)), dias = Math.max(0, Math.round(Number(b.desconto_dias) || 0));
   const ilim = Math.max(0, Math.round(Number(b.ilimitado_dias) || 0));
