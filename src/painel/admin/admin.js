@@ -131,8 +131,8 @@ telas.pacotes = async () => {
 
 telas.cupons = async () => {
   const d = await api('/api/admin/cupons'); const base = location.origin + '/app/?cupom=';
-  const desc = (c) => [c.creditos ? `${c.creditos} créditos` : '', c.desconto_pct ? `${c.desconto_pct}% por ${c.desconto_dias} dias${c.aplica === 'prepago' ? ' (pacotes)' : c.aplica === 'mensal' ? ' (plano mensal)' : ''}` : ''].filter(Boolean).join(' + ');
-  const corpo = `<p class="d">Cada cupom pode dar <b>créditos de brinde</b> (entram na hora) e/ou <b>desconto por alguns dias</b> a partir do resgate. O cliente usa na tela Créditos, no cadastro, pelo link <code>${esc(base)}CODIGO</code> ou digitando <code>cupom CODIGO</code> no Telegram. No plano mensal, a mensalidade volta ao preço cheio quando a janela termina.</p>
+  const desc = (c) => [c.ilimitado_dias ? `${c.ilimitado_dias} dias sem limite` : '', c.creditos ? `${c.creditos} créditos` : '', c.desconto_pct ? `${c.desconto_pct}% por ${c.desconto_dias} dias${c.aplica === 'prepago' ? ' (pacotes)' : c.aplica === 'mensal' ? ' (plano mensal)' : ''}` : ''].filter(Boolean).join(' + ');
+  const corpo = `<p class="d">Cada cupom pode dar <b>dias de uso sem limite</b> (não gasta créditos nesse período), <b>créditos de brinde</b> (entram na hora) e/ou <b>desconto por alguns dias</b> a partir do resgate. O cliente usa na tela Créditos, no cadastro, pelo link <code>${esc(base)}CODIGO</code> ou digitando <code>cupom CODIGO</code> no Telegram. No plano mensal, a mensalidade volta ao preço cheio quando a janela termina.</p>
     <div class="tabela compacta"><table><thead><tr><th>Código</th><th>Brinde</th><th>Descrição</th><th>Validade</th><th>Usos</th><th>Compras</th><th>Status</th><th></th></tr></thead><tbody>${d.cupons.map(c => `<tr data-id="${c.id}">
       <td class="mono"><b>${esc(c.codigo)}</b></td><td>${esc(desc(c))}</td><td>${esc(c.descricao || '')}${c.so_novos ? ' <span class="tag">só novos</span>' : ''}</td>
       <td>${c.validade_ate ? esc(c.validade_ate.split('-').reverse().join('/')) : '—'}</td><td>${c.resgates}${c.max_resgates ? ' / ' + c.max_resgates : ''}</td><td>${c.compras}</td>
@@ -142,6 +142,7 @@ telas.cupons = async () => {
     <h3 style="margin-top:16px" id="cupTit">Novo cupom</h3>
     <form id="fCup" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end"><input type="hidden" name="id">
       <div class="campo"><label>Código</label><input name="codigo" required placeholder="BEMVINDO" style="text-transform:uppercase"></div>
+      <div class="campo"><label>Dias de uso sem limite</label><input name="ilimitado_dias" type="number" min="0" value="0" style="width:130px"></div>
       <div class="campo"><label>Créditos de brinde</label><input name="creditos" type="number" min="0" value="0" style="width:120px"></div>
       <div class="campo"><label>Desconto %</label><input name="desconto_pct" type="number" min="0" max="90" step="1" value="0" style="width:100px"></div>
       <div class="campo"><label>Dias de desconto</label><input name="desconto_dias" type="number" min="0" value="30" style="width:110px"></div>
@@ -157,7 +158,7 @@ telas.cupons = async () => {
     const enviar = async (body) => { const r = await api('/api/admin/cupons', { method: 'POST', body: JSON.stringify(body) }); if (r.erro) return toast('⚠️ ' + r.erro); toast('✅ cupom salvo'); montarTela('cupons'); };
     f.onsubmit = (e) => { e.preventDefault(); const b = Object.fromEntries(new FormData(f)); b.so_novos = f.so_novos.checked; b.ativo = f.ativo.checked; enviar(b); };
     document.querySelectorAll('tr[data-id]').forEach(tr => { const c = d.cupons.find(x => String(x.id) === tr.dataset.id);
-      tr.querySelector('[data-ed]').onclick = () => { for (const k of ['id', 'codigo', 'creditos', 'desconto_pct', 'desconto_dias', 'aplica', 'validade_ate', 'max_resgates', 'descricao']) f[k].value = c[k] ?? ''; f.so_novos.checked = !!c.so_novos; f.ativo.checked = !!c.ativo; $('#cupTit').textContent = 'Editar ' + c.codigo; f.scrollIntoView({ behavior: 'smooth' }); };
+      tr.querySelector('[data-ed]').onclick = () => { for (const k of ['id', 'codigo', 'ilimitado_dias', 'creditos', 'desconto_pct', 'desconto_dias', 'aplica', 'validade_ate', 'max_resgates', 'descricao']) f[k].value = c[k] ?? ''; f.so_novos.checked = !!c.so_novos; f.ativo.checked = !!c.ativo; $('#cupTit').textContent = 'Editar ' + c.codigo; f.scrollIntoView({ behavior: 'smooth' }); };
       tr.querySelector('[data-on]').onclick = () => enviar({ ...c, ativo: !c.ativo });
       tr.querySelector('[data-link]').onclick = async () => { try { await navigator.clipboard.writeText(base + c.codigo); toast('🔗 link copiado'); } catch { prompt('Link:', base + c.codigo); } };
       tr.querySelector('[data-res]').onclick = async () => { const r = await api(`/api/admin/cupons/${c.id}/resgates`); $('#cupRes').innerHTML = `<h3 style="margin-top:16px">Quem usou ${esc(c.codigo)} (${r.resgates.length})</h3><div class="tabela compacta"><table><thead><tr><th>Quando</th><th>Cliente</th><th>E-mail</th><th>Créditos</th><th>Desconto até</th></tr></thead><tbody>${r.resgates.map(x => `<tr><td>${esc(x.resgatado_em.slice(0, 16))}</td><td>${esc(x.nome_dono || '')}${x.empresa ? ' · ' + esc(x.empresa) : ''}</td><td>${esc(x.email || '')}</td><td>${x.creditos_dados || ''}</td><td>${x.desconto_ate ? esc(x.desconto_ate.split('-').reverse().join('/')) : ''}</td></tr>`).join('') || '<tr><td colspan="5">Ninguém usou ainda.</td></tr>'}</tbody></table></div>`; };

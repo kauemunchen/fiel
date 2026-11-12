@@ -40,7 +40,7 @@ export async function governanca(msg, conta) {
   }
   if ((m = String(orig || t).trim().match(/^\/?cupom\s+([A-Za-z0-9_-]{3,40})$/i))) {
     const CU = await import('../creditos/cupons.js');
-    try { const r = CU.resgatarCupom(conta.id, m[1]); return `🎁 Cupom *${r.codigo}* ativado: ${r.beneficio}.${r.creditos ? `\n+${r.creditos.toLocaleString('pt-BR')} créditos já estão no seu saldo.` : ''}${r.desconto_pct ? `\nO desconto vale até ${r.desconto_ate.split('-').reverse().join('/')} — é só digitar *comprar*.` : ''}`; }
+    try { const r = CU.resgatarCupom(conta.id, m[1]); return `🎁 Cupom *${r.codigo}* ativado: ${r.beneficio}.${r.ilimitado_ate ? `\nUso sem limite até ${r.ilimitado_ate.split('-').reverse().join('/')} — use à vontade.` : ''}${r.creditos ? `\n+${r.creditos.toLocaleString('pt-BR')} créditos já estão no seu saldo.` : ''}${r.desconto_pct ? `\nO desconto vale até ${r.desconto_ate.split('-').reverse().join('/')} — é só digitar *comprar*.` : ''}`; }
     catch (e) { return `Não consegui ativar o cupom: ${e.message}`; }
   }
   if (/^(cr[ée]ditos?|saldo)$/.test(t)) { const c = await import('../creditos/index.js'); return c.textoResumo(conta.id); }

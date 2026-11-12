@@ -53,7 +53,11 @@ export function pacotes() { try { if (db.prepare("SELECT name FROM sqlite_master
 export const PACOTES = new Proxy([], { get(_t, k) { const arr = pacotes(); return typeof arr[k] === 'function' ? arr[k].bind(arr) : arr[k]; }, has(_t, k) { return k in pacotes(); }, ownKeys() { return Reflect.ownKeys(pacotes()); }, getOwnPropertyDescriptor(_t, k) { return Object.getOwnPropertyDescriptor(pacotes(), k); } });
 
 const contaDe = (id) => db.prepare('SELECT id, plano, status, admin, creditos_alerta, creditos_alerta_em, nome_dono FROM contas WHERE id=?').get(id);
-export function ilimitada(contaId) { const c = contaDe(contaId); return !!c && (c.admin === 1 || c.plano === 'ilimitado'); }
+/** Uso ilimitado temporário dado por cupom (ex.: 30 dias sem limite). Devolve a data final ou null. */
+export function ilimitadoAte(contaId) {
+  try { const hoje = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10); return db.prepare('SELECT MAX(ilimitado_ate) a FROM cupom_resgates WHERE conta_id=? AND ilimitado_ate>=?').get(contaId, hoje)?.a || null; } catch { return null; }
+}
+export function ilimitada(contaId) { const c = contaDe(contaId); return !!c && (c.admin === 1 || c.plano === 'ilimitado' || !!ilimitadoAte(contaId)); }
 export function saldo(contaId) { return +(db.prepare('SELECT COALESCE(SUM(quantidade),0) s FROM creditos_mov WHERE conta_id=?').get(contaId).s).toFixed(3); }
 /** Base para os alertas de 20%/5%: a última recarga (ou o trial). */
 export function ultimaRecarga(contaId) { return db.prepare("SELECT quantidade FROM creditos_mov WHERE conta_id=? AND quantidade>0 ORDER BY id DESC LIMIT 1").get(contaId)?.quantidade || TRIAL_CREDITOS; }
@@ -134,6 +138,7 @@ export function concederTrial(contaId) { if (db.prepare("SELECT id FROM creditos
 export function podeUsar(contaId, { tolerancia = 0 } = {}) {
   const c = contaDe(contaId); if (!c) return false; if (c.admin === 1 || c.plano === 'ilimitado') return true;
   if (c.status === 'suspensa') return false;
+  if (ilimitadoAte(contaId)) return true;
   if (!(saldo(contaId) > -tolerancia)) return false;
   // Piso de margem: se o custo real da IA desde a última recarga passar do limite, trava e marca a conta.
   const lm = limiteMargem(contaId);
@@ -181,7 +186,7 @@ export function resumo(contaId) {
   const gasto30 = porDia.reduce((a, b) => a + b.gasto, 0);
   const mediaDia = porDia.length ? gasto30 / Math.max(porDia.length, 1) : 0;
   const historico = db.prepare('SELECT id, tipo, quantidade, motivo, modulo, ref, criado_em FROM creditos_mov WHERE conta_id=? ORDER BY id DESC LIMIT 60').all(contaId);
-  return { produto: PRODUTO, saldo: s, ilimitada: ilim, plano: c?.plano, status: c?.status, base: ultimaRecarga(contaId), gasto_30d: +gasto30.toFixed(1), media_dia: +mediaDia.toFixed(2), dias_restantes: ilim ? null : mediaDia > 0 ? Math.floor(Math.max(s, 0) / mediaDia) : null, por_dia: porDia, por_modulo: porModulo, por_tipo: porTipo, historico, tarifas: TARIFAS, tokens_por_credito: tokensPorCredito(), pacotes: PACOTES, trial: TRIAL_CREDITOS };
+  return { produto: PRODUTO, saldo: s, ilimitada: ilim, ilimitado_ate: ilimitadoAte(contaId), admin: c?.admin === 1 || c?.plano === 'ilimitado', plano: c?.plano, status: c?.status, base: ultimaRecarga(contaId), gasto_30d: +gasto30.toFixed(1), media_dia: +mediaDia.toFixed(2), dias_restantes: ilim ? null : mediaDia > 0 ? Math.floor(Math.max(s, 0) / mediaDia) : null, por_dia: porDia, por_modulo: porModulo, por_tipo: porTipo, historico, tarifas: TARIFAS, tokens_por_credito: tokensPorCredito(), pacotes: PACOTES, trial: TRIAL_CREDITOS };
 }
 export function textoResumo(contaId) {
   const r = resumo(contaId);
