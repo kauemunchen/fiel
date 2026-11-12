@@ -80,10 +80,11 @@ export class WebCanal {
       const chatSinteico = `web:${contaId}`; db.prepare('INSERT INTO usuarios (conta_id, canal, chat_id, nome, papel, email, senha_hash) VALUES (?,?,?,?,?,?,?)').run(contaId, 'web', chatSinteico, nome, 'dono', email, hash(senha));
       for (const m of ['secretaria', 'social', 'documentos', 'financeiro']) db.prepare('INSERT INTO modulos (conta_id, modulo, ligado) VALUES (?,?,1)').run(contaId, m);
       try { const c = await import('../creditos/index.js'); c.concederTrial(contaId); } catch (e) { console.error('[cadastro] trial NÃO concedido para conta', contaId, e.message); }
+      let cupom = null; if (b.cupom) { try { const CU = await import('../creditos/cupons.js'); cupom = CU.resgatarCupom(contaId, b.cupom); } catch (e) { cupom = { erro: e.message }; } }
       const tok = crypto.randomBytes(24).toString('hex'); db.prepare('INSERT INTO web_sessoes (token, conta_id, chat_id) VALUES (?,?,?)').run(tok, contaId, chatSinteico);
       setCookie(res, tok);
       // Boas-vindas oficial sai ao concluir o onboarding (api-onboarding.js), já com o que ficou configurado
-      res.json({ ok: true, token: tok });
+      res.json({ ok: true, token: tok, cupom });
     });
 
     app.post('/api/login/senha', (req, res) => {

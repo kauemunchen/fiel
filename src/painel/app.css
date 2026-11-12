@@ -792,3 +792,7 @@ a.fin-pg-b::before{-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http
 .fin-pg-b:hover{background:var(--coral)}.fin-pg-b.ok{background:#2F7A4F;border-color:#2F7A4F;color:#fff}
 .fin-lin .fin-pg{margin-top:6px}
 .fin-lin .h-txt .fin-pg{display:flex!important;flex-direction:row!important;flex-wrap:wrap;gap:6px}.fin-lin .h-txt .fin-pg>*{width:auto;flex:none}
+
+/* Cupons */
+.cupom-ativo{margin:10px 0;padding:10px 14px;border-radius:12px;background:#FCE3DC;color:#18162D;font-size:14px}
+.pacote .de{opacity:.6;font-weight:400;margin-right:4px}.pacote .mini{display:block;font-size:11px;opacity:.75;margin-top:4px;line-height:1.3}

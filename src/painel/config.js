@@ -383,7 +383,8 @@ telas.creditos = async () => {
   const pct = d.ilimitada ? 100 : Math.max(0, Math.min(100, d.saldo / (d.base || 1) * 100));
   const cor = d.ilimitada ? '#4CAF7A' : pct <= 5 ? '#E25D5D' : pct <= 20 ? '#E0A030' : 'var(--ouro)';
   const maxDia = Math.max(1, ...d.por_dia.map(x => x.gasto || 0));
-  const TIPO = { trial: 'Boas-vindas', compra: 'Compra', plano: 'Plano mensal', credito: 'Crédito', ajuste: 'Ajuste', debito: 'Consumo' };
+  const TIPO = { trial: 'Boas-vindas', compra: 'Compra', plano: 'Plano mensal', credito: 'Crédito', ajuste: 'Ajuste', debito: 'Consumo', cupom: 'Cupom' };
+  const dsc = (tipo) => d.desconto?.[tipo]; const brlP = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 }); const comDesc = (p) => { const x = dsc(p.tipo); return x ? Math.max(1, Math.round(p.preco * (1 - x.pct / 100) * 100) / 100) : null; };
   const corpo = `<div class="grade">
     <div class="cartao" style="grid-column:1/-1">
       <h3>Saldo <span class="tag ${d.ilimitada ? 'ok' : pct <= 5 ? 'off' : pct <= 20 ? 'warn' : ''}">${d.ilimitada ? 'conta ilimitada (admin)' : d.plano === 'trial' ? 'período de teste' : 'plano ' + esc(d.plano || '')}</span></h3>
@@ -393,9 +394,14 @@ telas.creditos = async () => {
     </div>
     <div class="cartao"><h3>Comprar créditos ${d.asaas ? (d.ambiente === 'producao' ? '' : '<span class="tag warn">sandbox</span>') : '<span class="tag off">pagamento indisponível</span>'}</h3><p class="d">Pix ou cartão via Asaas. Créditos pré-pagos não vencem; o plano mensal renova todo mês e soma créditos ao saldo.</p>
       ${d.assinatura ? `<p class="d">Plano ativo: <b>${esc(d.assinatura.pacote?.nome || d.assinatura.pacote_id)}</b> · próxima cobrança ${esc(d.assinatura.proxima || '')} <button class="btn perigo" id="btCancelarPlano" style="margin-left:6px">cancelar plano</button></p>` : ''}
-      <div class="pacotes">${d.pacotes.map(p => `<button class="pacote" data-id="${p.id}" ${!d.asaas ? 'disabled' : ''}><b>${esc(p.nome)}</b><span>${p.creditos.toLocaleString('pt-BR')} créditos</span><span class="preco">R$ ${p.preco}${p.tipo === 'mensal' ? '<small>/mês</small>' : ''}</span></button>`).join('')}</div>
+      ${(d.cupons?.ativos || []).length ? `<div class="cupom-ativo">🎁 ${d.cupons.ativos.map(x => `<b>${esc(x.codigo)}</b>: ${x.desconto_pct}% de desconto${x.aplica === 'prepago' ? ' nos pacotes' : x.aplica === 'mensal' ? ' no plano mensal' : ''} até ${x.desconto_ate.split('-').reverse().join('/')}`).join(' · ')}</div>` : ''}
+      <div class="pacotes">${d.pacotes.map(p => `<button class="pacote" data-id="${p.id}" ${!d.asaas ? 'disabled' : ''}><b>${esc(p.nome)}</b><span>${p.creditos.toLocaleString('pt-BR')} créditos</span><span class="preco">${comDesc(p) ? `<s class="de">R$ ${brlP(p.preco)}</s> R$ ${brlP(comDesc(p))}` : `R$ ${p.preco}`}${p.tipo === 'mensal' ? '<small>/mês</small>' : ''}</span>${comDesc(p) && p.tipo === 'mensal' ? `<small class="mini">preço com desconto até ${dsc('mensal').ate.split('-').reverse().join('/')}, depois R$ ${brlP(p.preco)}</small>` : ''}</button>`).join('')}</div>
       <div id="compra" class="oculto" style="margin-top:12px;border-top:1px solid var(--sec);padding-top:12px"></div>
       ${d.cobrancas.length ? `<p class="d" style="margin-top:12px">Cobranças</p><ul class="lista-s">${d.cobrancas.slice(0, 8).map(c => `<li><span>${esc(c.criado_em.slice(0, 10))} · ${esc(NOMES_PAC(d, c.pacote_id))} · R$ ${c.valor}</span><span><span class="tag ${c.status === 'pago' ? 'ok' : c.status === 'pendente' ? 'warn' : 'off'}">${esc(c.status)}</span>${c.status === 'pendente' && c.invoice_url ? ` <a href="${esc(c.invoice_url)}" target="_blank" rel="noopener">pagar</a>` : ''}</span></li>`).join('')}</ul>` : ''}
+    </div>
+    <div class="cartao"><h3>Tenho um cupom</h3><p class="d">Cupons dão créditos de brinde e/ou desconto por alguns dias nas compras.</p>
+      <form id="fCupom" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><input name="codigo" required placeholder="CÓDIGO" autocomplete="off" style="flex:1;min-width:160px;text-transform:uppercase;min-height:44px;border-radius:10px;border:1px solid var(--linha,#ddd);padding:0 12px;font:700 15px var(--f-body,Arial)"><button class="btn prim">Ativar</button></form>
+      ${(d.cupons?.lista || []).length ? `<ul class="lista-s" style="margin-top:10px">${d.cupons.lista.slice(0, 6).map(x => `<li><span><b>${esc(x.codigo)}</b> · ${esc(x.resgatado_em.slice(0, 10).split('-').reverse().join('/'))}</span><span>${x.creditos_dados ? `+${x.creditos_dados} créditos` : ''}${x.creditos_dados && x.desconto_pct ? ' · ' : ''}${x.desconto_pct ? `${x.desconto_pct}% até ${x.desconto_ate.split('-').reverse().join('/')}` : ''}</span></li>`).join('')}</ul>` : ''}
     </div>
     <div class="cartao"><h3>Consumo (30 dias)</h3>
       <ul class="lista-s"><li><span>Total gasto</span><b>${fmtC(d.gasto_30d)}</b></li><li><span>Média por dia</span><b>${fmtC(d.media_dia)}</b></li></ul>
@@ -408,6 +414,7 @@ telas.creditos = async () => {
   </div>`;
   return { titulo: '💳 Créditos', sub: `Saldo, consumo e recargas do ${esc(d.produto)}.`, corpo, depois() {
     let poll = null;
+    $('#fCupom') && ($('#fCupom').onsubmit = async (e) => { e.preventDefault(); const codigo = e.target.codigo.value.trim(); try { const r = await post('/api/cupom/resgatar', { codigo }); toast(`🎁 ${r.beneficio}`); mostrarTela('creditos'); } catch {} });
     const mostrarCobranca = (cb) => {
       const box = $('#compra'); box.classList.remove('oculto');
       box.innerHTML = `<h3 style="font-size:15px;margin:0 0 6px">${esc(cb.pacote?.nome || cb.pacote_id)} · R$ ${cb.valor}${cb.tipo === 'mensal' ? '/mês' : ''} <span class="tag warn" id="cbStatus">aguardando pagamento</span></h3>

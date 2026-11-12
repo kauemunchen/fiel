@@ -20,7 +20,10 @@ async function mostrarLogin() {
     if (r.ok) { localStorage.setItem('akm', r.token); iniciar(); } else $('#erroEntrar').textContent = r.erro || 'não foi possível entrar'; };
   $('#formCadastro').onsubmit = async (e) => { e.preventDefault(); $('#erroCadastro').textContent = ''; const f = Object.fromEntries(new FormData(e.target));
     const r = await (await fetch('/api/cadastro', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(f) })).json();
-    if (r.ok) { localStorage.setItem('akm', r.token); iniciar(); } else $('#erroCadastro').textContent = r.erro || 'não foi possível criar'; };
+    if (r.ok) { localStorage.setItem('akm', r.token); if (r.cupom?.beneficio) try { sessionStorage.setItem('cupomOk', `Cupom ${r.cupom.codigo} ativado: ${r.cupom.beneficio}`); } catch {} else if (r.cupom?.erro) try { sessionStorage.setItem('cupomOk', `Conta criada. O cupom não foi aplicado: ${r.cupom.erro}`); } catch {} iniciar(); } else $('#erroCadastro').textContent = r.erro || 'não foi possível criar'; };
+  // cupom: vem no link (?cupom=CODIGO) e mostra o brinde antes de criar a conta
+  { const cc = $('#cadCupom'); if (cc) { const q = new URLSearchParams(location.search).get('cupom'); const ver = async () => { const v = cc.value.trim(); $('#cupomInfo').textContent = ''; if (v.length < 3) return; const r = await (await fetch('/api/cupom/validar?codigo=' + encodeURIComponent(v))).json().catch(() => ({})); $('#cupomInfo').textContent = r.ok ? '🎁 ' + r.beneficio : (r.erro || ''); };
+    cc.onchange = ver; cc.onblur = ver; if (q) { cc.value = q.toUpperCase(); ver(); document.querySelector('[data-aba="cadastro"]')?.click(); } } }
   // ---------- esqueci minha senha ----------
   const FORMS = ['formEntrar', 'formCadastro', 'formTelegram', 'formEsqueci', 'formRedefinir'];
   const mostrarForm = (id) => FORMS.forEach(x => document.getElementById(x)?.classList.toggle('oculto', x !== id));
@@ -54,6 +57,7 @@ async function carregarTelegram() {
 async function iniciar() {
   try { me = await api('/api/me'); } catch { return; }
   $('#login').classList.add('oculto'); $('#app').classList.remove('oculto');
+  try { const cm = sessionStorage.getItem('cupomOk'); if (cm) { sessionStorage.removeItem('cupomOk'); setTimeout(() => (window.toast || alert)(cm), 800); } } catch {}
   $('#donoNome').textContent = me.conta.nome_dono;
   if (me.conta.admin !== 1) setTimeout(() => window.verificarOnboarding?.(), 0);
   if (me.conta.admin === 1) $('#btAdmin').classList.remove('oculto');

@@ -70,7 +70,10 @@ export function rotasMarca(app) {
 
   // ---------- Créditos ----------
   app.get('/api/creditos', auth, async (req, res) => { const as = await import('../integracoes/pagamento.js'); const c = db.prepare('SELECT cpf_cnpj, email, nome_dono FROM contas WHERE id=?').get(req.contaId);
-    res.json({ ...resumoCreditos(req.contaId), asaas: as.configurado(), ambiente: process.env.ASAAS_AMBIENTE || 'sandbox', assinatura: as.assinaturaAtiva(req.contaId) || null, cobrancas: as.listarCobrancas(req.contaId), pagador: { nome: c.nome_dono, cpf_cnpj: c.cpf_cnpj, email: c.email } }); });
+    const CU = await import('../creditos/cupons.js'); const dP = CU.descontoAtivo(req.contaId, 'prepago'), dM = CU.descontoAtivo(req.contaId, 'mensal');
+    res.json({ ...resumoCreditos(req.contaId), cupons: CU.cuponsDaConta(req.contaId), desconto: { prepago: dP, mensal: dM }, asaas: as.configurado(), ambiente: process.env.ASAAS_AMBIENTE || 'sandbox', assinatura: as.assinaturaAtiva(req.contaId) || null, cobrancas: as.listarCobrancas(req.contaId), pagador: { nome: c.nome_dono, cpf_cnpj: c.cpf_cnpj, email: c.email } }); });
+  app.post('/api/cupom/resgatar', auth, async (req, res) => { const CU = await import('../creditos/cupons.js'); try { res.json(CU.resgatarCupom(req.contaId, req.body?.codigo)); } catch (e) { res.status(400).json({ erro: e.message }); } });
+  app.get('/api/cupom/validar', async (req, res) => { const CU = await import('../creditos/cupons.js'); try { const c = CU.validarCupom(null, req.query.codigo); res.json({ ok: true, codigo: c.codigo, beneficio: CU.descreverCupom(c) }); } catch (e) { res.status(400).json({ erro: e.message }); } });
   app.post('/api/creditos/comprar', auth, async (req, res) => { const as = await import('../integracoes/pagamento.js'); const b = req.body || {};
     try { res.json(await as.comprar(req.contaId, b.pacote_id, { forma: b.forma, nome: b.nome, cpfCnpj: b.cpf_cnpj, email: b.email })); } catch (e) { res.status(400).json({ erro: e.message }); } });
   app.get('/api/creditos/cobranca/:id', auth, async (req, res) => { const as = await import('../integracoes/pagamento.js'); const c = as.cobranca(req.contaId, req.params.id); if (!c) return res.status(404).json({ erro: 'não existe' });

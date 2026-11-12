@@ -13,4 +13,5 @@ export const rotaWebhook = mod.rotaWebhook;
 export const conferirPendentes = mod.conferirPendentes;
 export const docValido = mod.docValido;
 export const limparDoc = mod.limparDoc;
+export const atualizarValorAssinatura = mod.atualizarValorAssinatura;
 export const provedor = alvo === './asaas.js' ? 'asaas' : 'mercadopago';

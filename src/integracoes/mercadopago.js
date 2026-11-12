@@ -36,6 +36,7 @@ const expira = (minutos) => new Date(Date.now() + minutos * 60000).toISOString()
 /** Cria a cobrança (pré-pago) ou a assinatura (mensal). forma: pix|cartao|boleto. Devolve a cobrança gravada. */
 export async function comprar(contaId, pacoteId, { forma = 'pix', nome, cpfCnpj, email } = {}) {
   const p = PACOTES.find(x => x.id === pacoteId); if (!p) throw new Error('pacote inválido');
+  const CU = await import('../creditos/cupons.js'); const dc = CU.descontoAtivo(contaId, p.tipo); const preco = dc ? CU.precoComDesconto(p.preco, dc.pct) : p.preco;
   const c = db.prepare('SELECT * FROM contas WHERE id=?').get(contaId); if (!c) throw new Error('conta não existe');
   const doc = limparDoc(cpfCnpj || c.cpf_cnpj); const mail = email || c.email; const nomeC = nome || c.nome_dono;
   if (!docValido(doc)) throw new Error('CPF/CNPJ obrigatório para emitir a cobrança');
@@ -48,25 +49,27 @@ export async function comprar(contaId, pacoteId, { forma = 'pix', nome, cpfCnpj,
     const atual = db.prepare("SELECT * FROM assinaturas WHERE conta_id=? AND status='ativa'").get(contaId);
     if (atual) throw new Error(`Já existe um plano mensal ativo. Cancele antes de trocar.`);
     const voltar = (process.env.PUBLIC_URL || process.env.WEBAPP_URL || 'https://assessor.kauemunchen.com.br') + '/app';
-    const sub = await api('/preapproval', { metodo: 'POST', corpo: { reason: descricao, external_reference: ref, payer_email: mail || undefined, back_url: voltar, auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: p.preco, currency_id: 'BRL' }, status: 'pending' } });
-    db.prepare('INSERT INTO assinaturas (conta_id, asaas_id, pacote_id, valor, proxima, provedor) VALUES (?,?,?,?,?, ?)').run(contaId, sub.id, p.id, p.preco, sub.next_payment_date?.slice(0, 10) || hoje(1), 'mercadopago');
+    const sub = await api('/preapproval', { metodo: 'POST', corpo: { reason: descricao, external_reference: ref, payer_email: mail || undefined, back_url: voltar, auto_recurring: { frequency: 1, frequency_type: 'months', transaction_amount: preco, currency_id: 'BRL' }, status: 'pending' } });
+    db.prepare('INSERT INTO assinaturas (conta_id, asaas_id, pacote_id, valor, proxima, provedor) VALUES (?,?,?,?,?, ?)').run(contaId, sub.id, p.id, preco, sub.next_payment_date?.slice(0, 10) || hoje(1), 'mercadopago');
     const idCobr = sub.id + ':init';
     db.prepare('INSERT OR IGNORE INTO cobrancas (conta_id, asaas_id, assinatura_id, tipo, pacote_id, creditos, valor, forma, status, invoice_url, vencimento, provedor) VALUES (?,?,?,?,?,?,?,?,?,?,?, ?)')
-      .run(contaId, idCobr, sub.id, 'mensal', p.id, p.creditos, p.preco, 'cartao', 'pendente', sub.init_point, sub.next_payment_date?.slice(0, 10) || hoje(1), 'mercadopago');
+      .run(contaId, idCobr, sub.id, 'mensal', p.id, p.creditos, preco, 'cartao', 'pendente', sub.init_point, sub.next_payment_date?.slice(0, 10) || hoje(1), 'mercadopago');
+    try { if (dc) { db.prepare('UPDATE cobrancas SET cupom=? WHERE asaas_id=?').run(dc.codigo, idCobr); db.prepare("UPDATE assinaturas SET valor_cheio=?, desconto_ate=? WHERE conta_id=? AND status='ativa'").run(p.preco, dc.ate, contaId); } } catch {}
     return cobranca(contaId, idCobr);
   }
 
-  const basePay = { transaction_amount: p.preco, description: descricao, external_reference: ref, notification_url: (process.env.PUBLIC_URL || 'https://assessor.kauemunchen.com.br') + '/webhooks/mercadopago', payer: { email: mail || `conta-${contaId}@kmapp.local`, first_name: primNome, last_name: sobrenome, identification: { type: doc.length === 14 ? 'CNPJ' : 'CPF', number: doc } } };
+  const basePay = { transaction_amount: preco, description: descricao, external_reference: ref, notification_url: (process.env.PUBLIC_URL || 'https://assessor.kauemunchen.com.br') + '/webhooks/mercadopago', payer: { email: mail || `conta-${contaId}@kmapp.local`, first_name: primNome, last_name: sobrenome, identification: { type: doc.length === 14 ? 'CNPJ' : 'CPF', number: doc } } };
   let pag;
   if (forma === 'pix') { pag = await api('/v1/payments', { metodo: 'POST', corpo: { ...basePay, payment_method_id: 'pix', date_of_expiration: expira(60) } }); }
   else if (forma === 'boleto') { pag = await api('/v1/payments', { metodo: 'POST', corpo: { ...basePay, payment_method_id: 'bolbradesco', date_of_expiration: expira(60 * 24 * 3) } }); }
   else { // cartão → cria Preference de Checkout Pro, retorna init_point
-    const pref = await api('/checkout/preferences', { metodo: 'POST', corpo: { items: [{ title: descricao, quantity: 1, unit_price: p.preco, currency_id: 'BRL' }], payer: { name: primNome, surname: sobrenome, email: mail || undefined, identification: { type: doc.length === 14 ? 'CNPJ' : 'CPF', number: doc } }, external_reference: ref, notification_url: basePay.notification_url, payment_methods: { excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }] }, back_urls: { success: (process.env.PUBLIC_URL || 'https://assessor.kauemunchen.com.br') + '/app', failure: (process.env.PUBLIC_URL || 'https://assessor.kauemunchen.com.br') + '/app', pending: (process.env.PUBLIC_URL || 'https://assessor.kauemunchen.com.br') + '/app' } } });
+    const pref = await api('/checkout/preferences', { metodo: 'POST', corpo: { items: [{ title: descricao, quantity: 1, unit_price: preco, currency_id: 'BRL' }], payer: { name: primNome, surname: sobrenome, email: mail || undefined, identification: { type: doc.length === 14 ? 'CNPJ' : 'CPF', number: doc } }, external_reference: ref, notification_url: basePay.notification_url, payment_methods: { excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }] }, back_urls: { success: (process.env.PUBLIC_URL || 'https://assessor.kauemunchen.com.br') + '/app', failure: (process.env.PUBLIC_URL || 'https://assessor.kauemunchen.com.br') + '/app', pending: (process.env.PUBLIC_URL || 'https://assessor.kauemunchen.com.br') + '/app' } } });
     pag = { id: 'pref:' + pref.id, status: 'pending', init_point: pref.init_point, date_of_expiration: null };
   }
   const qr = pag.point_of_interaction?.transaction_data; const link = pag.transaction_details?.external_resource_url || pag.init_point;
   db.prepare('INSERT OR IGNORE INTO cobrancas (conta_id, asaas_id, tipo, pacote_id, creditos, valor, forma, status, invoice_url, pix_payload, pix_qr, vencimento, provedor) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, ?)')
-    .run(contaId, String(pag.id), 'prepago', p.id, p.creditos, p.preco, forma, 'pendente', link || null, qr?.qr_code || null, qr?.qr_code_base64 || null, pag.date_of_expiration?.slice(0, 10) || null, 'mercadopago');
+    .run(contaId, String(pag.id), 'prepago', p.id, p.creditos, preco, forma, 'pendente', link || null, qr?.qr_code || null, qr?.qr_code_base64 || null, pag.date_of_expiration?.slice(0, 10) || null, 'mercadopago');
+  try { if (dc) { db.prepare('UPDATE cobrancas SET cupom=? WHERE conta_id=? AND id=(SELECT MAX(id) FROM cobrancas WHERE conta_id=?)').run(dc.codigo, contaId, contaId); if (p.tipo === 'mensal') db.prepare("UPDATE assinaturas SET valor_cheio=?, desconto_ate=? WHERE conta_id=? AND status='ativa'").run(p.preco, dc.ate, contaId); } } catch (e) { console.error('[cupons] marcar compra', e.message); }
   return cobranca(contaId, String(pag.id));
 }
 
@@ -159,3 +162,6 @@ export async function conferirPendentes() {
     catch (e) { console.warn('[mp] conferir', asaas_id, e.message); }
   }
 }
+
+/** Muda o valor da mensalidade (fim do desconto de cupom). */
+export async function atualizarValorAssinatura(a, valor) { await api(`/preapproval/${a.asaas_id}`, { metodo: 'PUT', corpo: { auto_recurring: { transaction_amount: valor, currency_id: 'BRL' } } }); }

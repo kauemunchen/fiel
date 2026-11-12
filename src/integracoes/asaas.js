@@ -40,6 +40,7 @@ export async function garantirCliente(contaId, { nome, cpfCnpj, email } = {}) {
 /** Cria a cobrança (pré-pago) ou a assinatura (mensal). forma: pix | cartao | boleto. Devolve {cobranca} com link/QR. */
 export async function comprar(contaId, pacoteId, { forma = 'pix', nome, cpfCnpj, email } = {}) {
   const p = PACOTES.find(x => x.id === pacoteId); if (!p) throw new Error('pacote inválido');
+  const CU = await import('../creditos/cupons.js'); const dc = CU.descontoAtivo(contaId, p.tipo); const preco = dc ? CU.precoComDesconto(p.preco, dc.pct) : p.preco;
   const cliente = await garantirCliente(contaId, { nome, cpfCnpj, email });
   const billingType = forma === 'cartao' ? 'CREDIT_CARD' : forma === 'boleto' ? 'BOLETO' : 'PIX';
   const descricao = `${PRODUTO} · ${p.nome} (${p.creditos.toLocaleString('pt-BR')} créditos)`;
@@ -47,17 +48,18 @@ export async function comprar(contaId, pacoteId, { forma = 'pix', nome, cpfCnpj,
   if (p.tipo === 'mensal') {
     const atual = db.prepare("SELECT * FROM assinaturas WHERE conta_id=? AND status='ativa'").get(contaId);
     if (atual) throw new Error(`Já existe um plano mensal ativo (${PACOTES.find(x => x.id === atual.pacote_id)?.nome || atual.pacote_id}). Cancele antes de trocar.`);
-    const s = await api('/subscriptions', { metodo: 'POST', corpo: { customer: cliente, billingType, value: p.preco, nextDueDate: hoje(1), cycle: 'MONTHLY', description: descricao, externalReference: `conta:${contaId}|pacote:${p.id}` } });
+    const s = await api('/subscriptions', { metodo: 'POST', corpo: { customer: cliente, billingType, value: preco, nextDueDate: hoje(1), cycle: 'MONTHLY', description: descricao, externalReference: `conta:${contaId}|pacote:${p.id}` } });
     assinaturaId = s.id;
-    db.prepare('INSERT INTO assinaturas (conta_id, asaas_id, pacote_id, valor, proxima) VALUES (?,?,?,?,?)').run(contaId, s.id, p.id, p.preco, s.nextDueDate || hoje(1));
+    db.prepare('INSERT INTO assinaturas (conta_id, asaas_id, pacote_id, valor, proxima) VALUES (?,?,?,?,?)').run(contaId, s.id, p.id, preco, s.nextDueDate || hoje(1));
     const lista = await api(`/subscriptions/${s.id}/payments?limit=1`); pag = lista.data?.[0];
     if (!pag) throw new Error('assinatura criada, mas a primeira cobrança ainda não foi gerada; tente de novo em 1 min');
   } else {
-    pag = await api('/payments', { metodo: 'POST', corpo: { customer: cliente, billingType, value: p.preco, dueDate: hoje(2), description: descricao, externalReference: `conta:${contaId}|pacote:${p.id}` } });
+    pag = await api('/payments', { metodo: 'POST', corpo: { customer: cliente, billingType, value: preco, dueDate: hoje(2), description: descricao, externalReference: `conta:${contaId}|pacote:${p.id}` } });
   }
   let pix = null; if (billingType === 'PIX') { try { pix = await api(`/payments/${pag.id}/pixQrCode`); } catch {} }
   db.prepare('INSERT OR IGNORE INTO cobrancas (conta_id, asaas_id, assinatura_id, tipo, pacote_id, creditos, valor, forma, status, invoice_url, pix_payload, pix_qr, vencimento) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(contaId, pag.id, assinaturaId, p.tipo, p.id, p.creditos, p.preco, forma, 'pendente', pag.invoiceUrl || null, pix?.payload || null, pix?.encodedImage || null, pag.dueDate || null);
+    .run(contaId, pag.id, assinaturaId, p.tipo, p.id, p.creditos, preco, forma, 'pendente', pag.invoiceUrl || null, pix?.payload || null, pix?.encodedImage || null, pag.dueDate || null);
+  try { if (dc) { db.prepare('UPDATE cobrancas SET cupom=? WHERE conta_id=? AND id=(SELECT MAX(id) FROM cobrancas WHERE conta_id=?)').run(dc.codigo, contaId, contaId); if (p.tipo === 'mensal') db.prepare("UPDATE assinaturas SET valor_cheio=?, desconto_ate=? WHERE conta_id=? AND status='ativa'").run(p.preco, dc.ate, contaId); } } catch (e) { console.error('[cupons] marcar compra', e.message); }
   return cobranca(contaId, pag.id);
 }
 export function cobranca(contaId, asaasId) { const c = db.prepare('SELECT * FROM cobrancas WHERE conta_id=? AND asaas_id=?').get(contaId, asaasId); return c && { ...c, pacote: PACOTES.find(p => p.id === c.pacote_id) }; }
@@ -120,3 +122,6 @@ export async function conferirPendentes() {
     catch (e) { console.warn('[asaas] conferir', asaas_id, e.message); }
   }
 }
+
+/** Muda o valor da mensalidade (fim do desconto de cupom). */
+export async function atualizarValorAssinatura(a, valor) { await api(`/subscriptions/${a.asaas_id}`, { metodo: 'POST', corpo: { value: valor, updatePendingPayments: true } }); }

@@ -106,6 +106,9 @@ export function rotasAdmin(app) {
   });
 
   // Pacotes & preços
+  app.get('/api/admin/cupons', auth, async (req, res) => { const CU = await import('../creditos/cupons.js'); res.json({ cupons: CU.listarCupons() }); });
+  app.post('/api/admin/cupons', auth, async (req, res) => { const CU = await import('../creditos/cupons.js'); try { const r = CU.salvarCupom(req.body || {}); logAdmin(req.contaId, 'cupom.salvar', req.body?.codigo); res.json(r); } catch (e) { res.status(400).json({ erro: e.message }); } });
+  app.get('/api/admin/cupons/:id/resgates', auth, async (req, res) => { const CU = await import('../creditos/cupons.js'); res.json({ resgates: CU.resgatesDoCupom(req.params.id) }); });
   app.get('/api/admin/pacotes', auth, (req, res) => res.json({ pacotes: db.prepare('SELECT * FROM pacotes_cfg ORDER BY ordem, id').all(), tarifas: TARIFAS, trial: TRIAL_CREDITOS }));
   app.post('/api/admin/pacotes/:id', auth, (req, res) => {
     const { nome, creditos, preco, tipo, ativo, ordem } = req.body || {};
